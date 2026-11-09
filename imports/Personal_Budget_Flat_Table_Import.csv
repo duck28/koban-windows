@@ -1,0 +1,80 @@
+Mode,Group,Category,Kind,Budget,Actual,Difference
+home,INCOME,Wages & Tips,income,5200,5200,0
+home,INCOME,Interest Income,income,0,0,0
+home,INCOME,Dividends,income,0,0,0
+home,INCOME,Gifts Received,income,0,0,0
+home,INCOME,Refunds/Reimbursements,income,0,0,0
+home,INCOME,Transfer from Savings,income,0,0,0
+home,INCOME,Other,income,0,0,0
+home,HOME EXPENSES,Mortgage/Rent,expense,1140,1140,0
+home,HOME EXPENSES,Home/Rental Insurance,expense,0,0,0
+home,HOME EXPENSES,Electricity,expense,60,60,0
+home,HOME EXPENSES,Gas/Oil,expense,0,0,0
+home,HOME EXPENSES,Water/Sewer/Trash,expense,0,0,0
+home,HOME EXPENSES,Phone,expense,15,15,0
+home,HOME EXPENSES,Cable/Satellite,expense,0,0,0
+home,HOME EXPENSES,Internet,expense,50,50,0
+home,HOME EXPENSES,Furnishings/Appliances,expense,0,0,0
+home,HOME EXPENSES,Lawn/Garden,expense,0,0,0
+home,HOME EXPENSES,Maintenance/Supplies,expense,0,0,0
+home,HOME EXPENSES,Improvements,expense,0,0,0
+home,HOME EXPENSES,Other,expense,0,0,0
+home,TRANSPORTATION,Vehicle Payments,expense,0,0,0
+home,TRANSPORTATION,Auto Insurance,expense,0,0,0
+home,TRANSPORTATION,Fuel,expense,0,0,0
+home,TRANSPORTATION,Bus/Taxi/Train Fare,expense,150,150,0
+home,TRANSPORTATION,Repairs,expense,0,0,0
+home,TRANSPORTATION,Registration/License,expense,0,0,0
+home,TRANSPORTATION,Other,expense,0,0,0
+home,HEALTH,Health Insurance,expense,386.15,386.15,0
+home,HEALTH,Doctor/Dentist,expense,0,0,0
+home,HEALTH,Medicine/Drugs,expense,0,0,0
+home,HEALTH,Health Club Dues,expense,0,0,0
+home,HEALTH,Life Insurance,expense,0,0,0
+home,HEALTH,Veterinarian/Pet Care,expense,0,0,0
+home,HEALTH,Other,expense,0,0,0
+home,CHARITY/GIFTS,Gifts Given,expense,0,0,0
+home,CHARITY/GIFTS,Charitable Donations,expense,0,0,0
+home,CHARITY/GIFTS,Religious Donations,expense,0,0,0
+home,CHARITY/GIFTS,Other,expense,0,0,0
+home,SUBSCRIPTIONS,iCloud,expense,0,0,0
+home,SUBSCRIPTIONS,Youtube Premium,expense,8,8,0
+home,SUBSCRIPTIONS,Spotify,expense,17,17,0
+home,SUBSCRIPTIONS,Other,expense,0,0,0
+home,DAILY LIVING,Groceries,expense,350,350,0
+home,DAILY LIVING,Personal Supplies,expense,0,0,0
+home,DAILY LIVING,Clothing,expense,0,0,0
+home,DAILY LIVING,Cleaning,expense,0,0,0
+home,DAILY LIVING,Education/Lessons,expense,0,0,0
+home,DAILY LIVING,Dining/Eating Out,expense,100,100,0
+home,DAILY LIVING,Salon/Barber,expense,60,60,0
+home,DAILY LIVING,Pet Food,expense,0,0,0
+home,DAILY LIVING,Other,expense,0,0,0
+home,ENTERTAINMENT,Activities,expense,0,0,0
+home,ENTERTAINMENT,Books,expense,0,0,0
+home,ENTERTAINMENT,Games,expense,0,0,0
+home,ENTERTAINMENT,Fun Stuff,expense,0,0,0
+home,ENTERTAINMENT,Hobbies,expense,0,0,0
+home,ENTERTAINMENT,Media,expense,0,0,0
+home,ENTERTAINMENT,Outdoor Recreation,expense,0,0,0
+home,ENTERTAINMENT,Gym,expense,70,70,0
+home,ENTERTAINMENT,Toys/Gadgets,expense,0,0,0
+home,ENTERTAINMENT,Vacation/Travel,expense,0,0,0
+home,ENTERTAINMENT,Other,expense,0,0,0
+home,SAVINGS,Emergency Fund,savings,0,0,0
+home,SAVINGS,Car Replacement,savings,0,0,0
+home,SAVINGS,Retirement Fund,savings,0,0,0
+home,SAVINGS,Investments,savings,0,0,0
+home,SAVINGS,Education Fund,savings,0,0,0
+home,SAVINGS,Other,savings,0,0,0
+home,OBLIGATIONS,Education Fees IPSO,expense,250,250,0
+home,OBLIGATIONS,Education Fees Kaleidos,expense,280,280,0
+home,OBLIGATIONS,Credit Cards,expense,0,0,0
+home,OBLIGATIONS,Alimony/Child Support,expense,0,0,0
+home,OBLIGATIONS,Federal Taxes,expense,0,0,0
+home,OBLIGATIONS,State/Local Taxes,expense,0,0,0
+home,OBLIGATIONS,Ausgleich ohne AG Förderung,expense,250,0,250
+home,OBLIGATIONS,Other,expense,280,0,280
+home,MISCELLANEOUS,Bank Fees,expense,0,0,0
+home,MISCELLANEOUS,Postage,expense,0,0,0
+home,MISCELLANEOUS,Other,expense,0,0,0

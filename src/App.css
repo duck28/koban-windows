@@ -1,0 +1,334 @@
+@import "tailwindcss";
+
+/*
+ * ZenLedger design tokens — paper & ink (oriented on ZenPDF).
+ * Light ("washi") by default, dark ("sumi") follows system setting or manual toggle.
+ * Vermilion hanko seal accent + Moss green & Indigo dye for financial clarity.
+ */
+:root,
+[data-theme="light"] {
+  --app: #f5f3ee;        /* window background */
+  --surface: #fbfaf7;    /* bars, cards & panels */
+  --raised: #eeebe4;     /* hover, inputs, active tool */
+  --line: #e3dfd6;       /* hairlines */
+  --ink: #1f1e1c;        /* primary text & icons */
+  --ink-2: #5f5b54;      /* secondary text */
+  --ink-3: #9b968d;      /* muted text, placeholders */
+  --accent: #b9432f;     /* vermilion (hanko seal / over-budget) */
+  --positive: #3f704d;   /* moss green (favorable / income / savings) */
+  --indigo: #3f6e8c;     /* indigo dye (freelancer / business accent) */
+  --warning: #b8862d;    /* gold ochre (approaching limit / tax reserve) */
+  --viewer: #e8e5de;     /* backdrop */
+  --on-ink: #fbfaf7;     /* text on ink buttons */
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --app: #141413;
+    --surface: #1a1a18;
+    --raised: #262522;
+    --line: #2d2c29;
+    --ink: #ebe7df;
+    --ink-2: #aaa59b;
+    --ink-3: #6f6b64;
+    --accent: #e0644c;
+    --positive: #68a878;
+    --indigo: #679bc0;
+    --warning: #e0a94c;
+    --viewer: #0f0f0e;
+    --on-ink: #161614;
+    color-scheme: dark;
+  }
+}
+
+[data-theme="dark"] {
+  --app: #141413;
+  --surface: #1a1a18;
+  --raised: #262522;
+  --line: #2d2c29;
+  --ink: #ebe7df;
+  --ink-2: #aaa59b;
+  --ink-3: #6f6b64;
+  --accent: #e0644c;
+  --positive: #68a878;
+  --indigo: #679bc0;
+  --warning: #e0a94c;
+  --viewer: #0f0f0e;
+  --on-ink: #161614;
+  color-scheme: dark;
+}
+
+/* ==========================================================================
+   Palette Personalization: Full Monochromatic (Pure B&W)
+   ========================================================================== */
+[data-palette="monochrome"],
+[data-theme="light"][data-palette="monochrome"] {
+  --app: #f6f6f6;
+  --surface: #ffffff;
+  --raised: #e8e8e8;
+  --line: #cccccc;
+  --ink: #000000;
+  --ink-2: #383838;
+  --ink-3: #757575;
+  --accent: #111111;
+  --positive: #262626;
+  --indigo: #404040;
+  --warning: #616161;
+  --viewer: #eaeaea;
+  --on-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-palette="monochrome"] {
+    --app: #080808;
+    --surface: #111111;
+    --raised: #1c1c1c;
+    --line: #2b2b2b;
+    --ink: #fdfdfd;
+    --ink-2: #adadad;
+    --ink-3: #6e6e6e;
+    --accent: #ffffff;
+    --positive: #e5e5e5;
+    --indigo: #cccccc;
+    --warning: #999999;
+    --viewer: #000000;
+    --on-ink: #000000;
+  }
+}
+
+[data-theme="dark"][data-palette="monochrome"] {
+  --app: #080808;
+  --surface: #111111;
+  --raised: #1c1c1c;
+  --line: #2b2b2b;
+  --ink: #fdfdfd;
+  --ink-2: #adadad;
+  --ink-3: #6e6e6e;
+  --accent: #ffffff;
+  --positive: #e5e5e5;
+  --indigo: #cccccc;
+  --warning: #999999;
+  --viewer: #000000;
+  --on-ink: #000000;
+}
+
+/* ==========================================================================
+   Palette Personalization: Slate / Nord (Cool Minimalist Arctic)
+   ========================================================================== */
+[data-palette="slate"],
+[data-theme="light"][data-palette="slate"] {
+  --app: #f1f5f9;
+  --surface: #ffffff;
+  --raised: #e2e8f0;
+  --line: #cbd5e1;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #94a3b8;
+  --accent: #0284c7;
+  --positive: #059669;
+  --indigo: #3b82f6;
+  --warning: #d97706;
+  --viewer: #e2e8f0;
+  --on-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-palette="slate"] {
+    --app: #0b0f17;
+    --surface: #111827;
+    --raised: #1e293b;
+    --line: #334155;
+    --ink: #f8fafc;
+    --ink-2: #94a3b8;
+    --ink-3: #64748b;
+    --accent: #38bdf8;
+    --positive: #34d399;
+    --indigo: #60a5fa;
+    --warning: #fbbf24;
+    --viewer: #070a0f;
+    --on-ink: #0b0f17;
+  }
+}
+
+[data-theme="dark"][data-palette="slate"] {
+  --app: #0b0f17;
+  --surface: #111827;
+  --raised: #1e293b;
+  --line: #334155;
+  --ink: #f8fafc;
+  --ink-2: #94a3b8;
+  --ink-3: #64748b;
+  --accent: #38bdf8;
+  --positive: #34d399;
+  --indigo: #60a5fa;
+  --warning: #fbbf24;
+  --viewer: #070a0f;
+  --on-ink: #0b0f17;
+}
+
+/* ==========================================================================
+   Palette Personalization: Emerald / Forest (Deep Botanical Jade)
+   ========================================================================== */
+[data-palette="forest"],
+[data-theme="light"][data-palette="forest"] {
+  --app: #f2f5f1;
+  --surface: #fafbfa;
+  --raised: #e3eae1;
+  --line: #ced7cc;
+  --ink: #142217;
+  --ink-2: #485c4c;
+  --ink-3: #87998b;
+  --accent: #1e5a38;
+  --positive: #2e7d32;
+  --indigo: #2c6e64;
+  --warning: #c28100;
+  --viewer: #e3eae1;
+  --on-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-palette="forest"] {
+    --app: #0c1410;
+    --surface: #13201a;
+    --raised: #1c2e25;
+    --line: #273e33;
+    --ink: #f0f7f2;
+    --ink-2: #9db5a3;
+    --ink-3: #5f7a67;
+    --accent: #34d399;
+    --positive: #4ade80;
+    --indigo: #2dd4bf;
+    --warning: #facc15;
+    --viewer: #080d0a;
+    --on-ink: #0c1410;
+  }
+}
+
+[data-theme="dark"][data-palette="forest"] {
+  --app: #0c1410;
+  --surface: #13201a;
+  --raised: #1c2e25;
+  --line: #273e33;
+  --ink: #f0f7f2;
+  --ink-2: #9db5a3;
+  --ink-3: #5f7a67;
+  --accent: #34d399;
+  --positive: #4ade80;
+  --indigo: #2dd4bf;
+  --warning: #facc15;
+  --viewer: #080d0a;
+  --on-ink: #0c1410;
+}
+
+/* ==========================================================================
+   Monochromatic Helper Filters & Personalization Tokens
+   ========================================================================== */
+[data-palette="monochrome"] [data-color-dot],
+[data-palette="monochrome"] .category-color-dot {
+  filter: grayscale(100%) contrast(150%);
+}
+
+[data-density="compact"] {
+  font-size: 0.9375rem;
+}
+
+[data-high-contrast="true"] .tabular-nums {
+  font-weight: 600 !important;
+}
+
+@theme {
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-positive: var(--positive);
+  --color-indigo: var(--indigo);
+  --color-warning: var(--warning);
+  --color-viewer: var(--viewer);
+  --color-on-ink: var(--on-ink);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: var(--font-sans);
+    background-color: var(--app);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  :focus-visible {
+    outline: 1.5px solid var(--ink-2);
+    outline-offset: 1px;
+  }
+}
+
+/* Fine-line icons throughout */
+.lucide {
+  stroke-width: 1.5;
+}
+
+/* Quiet scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-3) 35%, transparent);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink-3) 60%, transparent);
+  background-clip: padding-box;
+}
+
+/* Clean number inputs without spin buttons */
+input[type="number"].no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"].no-spinner::-webkit-inner-spin-button,
+input[type="number"].no-spinner::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Automatic Light / Dark Mode Logo Switching */
+.koban-logo-dark {
+  display: none;
+}
+.koban-logo-light {
+  display: inline-block;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .koban-logo-dark {
+    display: inline-block;
+  }
+  :root:not([data-theme="light"]) .koban-logo-light {
+    display: none;
+  }
+}
+[data-theme="dark"] .koban-logo-dark {
+  display: inline-block;
+}
+[data-theme="dark"] .koban-logo-light {
+  display: none;
+}

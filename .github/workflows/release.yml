@@ -1,0 +1,64 @@
+# Builds the Windows installers (NSIS .exe + .msi) and publishes them as a GitHub Release.
+#
+# Release:  git tag v1.2.0 && git push origin v1.2.0
+# The tag sets the app version (MSI needs plain numbers: vMAJOR.MINOR.PATCH).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must look like v1.2.3 (got ${{ github.ref_name }})" }
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $conf.version = $version
+          $conf | ConvertTo-Json -Depth 32 | Set-Content src-tauri/tauri.conf.json -Encoding utf8
+          npm pkg set version=$version
+          (Get-Content src-tauri/Cargo.toml) -replace '^version = ".*"$', "version = `"$version`"" | Set-Content src-tauri/Cargo.toml -Encoding utf8
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Koban for Windows ${{ github.ref_name }}
+          releaseBody: |
+            Windows installers for Koban ${{ github.ref_name }}.
+
+            - `Koban_*_x64-setup.exe` — standard installer (recommended)
+            - `Koban_*_x64_en-US.msi` — MSI package
+
+            The installers are not code-signed yet, so Windows SmartScreen may warn on first run ("More info" → "Run anyway").
+          releaseDraft: false
+          prerelease: false

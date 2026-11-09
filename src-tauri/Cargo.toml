@@ -1,0 +1,33 @@
+[package]
+name = "koban"
+version = "0.1.0"
+description = "Koban for Windows: Minimalist Home & Freelancer Budgeting"
+authors = ["Roland Matuz"]
+edition = "2024"
+
+[lib]
+name = "koban_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
+base64 = "0.22"
+rusqlite = { version = "0.32", features = ["bundled"] }
+aes-gcm = "0.10"
+sha2 = "0.10"
+getrandom = "0.2"
+ureq = { version = "2.10", features = ["tls"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

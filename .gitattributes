@@ -1,0 +1,5 @@
+# Keep LF everywhere (the macOS Makefile and Swift sources must not get CRLF)
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
