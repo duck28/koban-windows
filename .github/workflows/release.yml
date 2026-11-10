@@ -19,24 +19,30 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
-      - uses: swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: "./src-tauri -> target"
 
       - name: Set version from tag
         shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must look like v1.2.3 (got ${{ github.ref_name }})" }
+          $version = $env:TAG.TrimStart("v")
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must look like v1.2.3 (got $env:TAG)" }
           $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $conf.version = $version
           $conf | ConvertTo-Json -Depth 32 | Set-Content src-tauri/tauri.conf.json -Encoding utf8
@@ -47,7 +53,8 @@ jobs:
         run: npm ci
 
       - name: Build and publish release
-        uses: tauri-apps/tauri-action@v0
+        id: tauri
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -60,5 +67,23 @@ jobs:
             - `Koban_*_x64_en-US.msi` — MSI package
 
             The installers are not code-signed yet, so Windows SmartScreen may warn on first run ("More info" → "Run anyway").
+            Verify your download against `SHA256SUMS.txt` (PowerShell: `Get-FileHash <file>`).
           releaseDraft: false
           prerelease: false
+
+      - name: Upload SHA256SUMS.txt
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          $files = $env:ARTIFACT_PATHS | ConvertFrom-Json | Where-Object { Test-Path $_ -PathType Leaf }
+          if (-not $files) { throw "tauri-action reported no artifacts" }
+          $lines = foreach ($f in $files) {
+            "{0}  {1}" -f (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $f -Leaf)
+          }
+          [IO.File]::WriteAllText("SHA256SUMS.txt", (($lines -join "`n") + "`n"))
+          Get-Content SHA256SUMS.txt
+          gh release upload $env:TAG SHA256SUMS.txt --clobber

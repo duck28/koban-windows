@@ -29,6 +29,28 @@ fn lock_db_file() -> std::sync::MutexGuard<'static, ()> {
     DB_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Paths the user chose in a native dialog (or that `list_backups` returned) during this session.
+/// File-access commands only accept these, so script running in the web view (e.g. through an XSS
+/// in imported data) cannot read or overwrite arbitrary files by passing its own paths.
+static USER_GRANTED_PATHS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn grant_user_path(path: &Path) {
+    let mut guard = USER_GRANTED_PATHS.lock().unwrap_or_else(|e| e.into_inner());
+    if !guard.iter().any(|p| p == path) {
+        guard.push(path.to_path_buf());
+    }
+}
+
+fn require_user_path(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    let guard = USER_GRANTED_PATHS.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.iter().any(|p| p == &candidate) {
+        Ok(candidate)
+    } else {
+        Err("Access denied: choose the file or folder in the dialog first.".into())
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DbInfo {
     pub db_path: String,
@@ -539,16 +561,13 @@ fn get_db_info() -> Result<DbInfo, String> {
     init_schema(&conn)?;
     migrate_and_drop_plaintext_tables(&mut conn)?;
 
-    let encrypted_records: usize = conn
-        .query_row("SELECT COUNT(*) FROM encrypted_records", [], |r| {
-            r.get::<_, usize>(0)
-        })
-        .unwrap_or(0)
-        + conn
-            .query_row("SELECT COUNT(*) FROM encrypted_vault", [], |r| {
-                r.get::<_, usize>(0)
-            })
-            .unwrap_or(0);
+    let count_rows = |sql: &str| -> usize {
+        conn.query_row(sql, [], |r| r.get::<_, i64>(0))
+            .map(|n| usize::try_from(n).unwrap_or(0))
+            .unwrap_or(0)
+    };
+    let encrypted_records = count_rows("SELECT COUNT(*) FROM encrypted_records")
+        + count_rows("SELECT COUNT(*) FROM encrypted_vault");
 
     let has_custom_passphrase: bool = conn
         .query_row(
@@ -682,6 +701,7 @@ fn list_backups(backup_dir: String) -> Result<Vec<BackupEntry>, String> {
             if path.is_file() {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.ends_with(".db") || name.ends_with(".sqlite") {
+                    grant_user_path(&path);
                     let meta = entry.metadata().ok();
                     list.push(BackupEntry {
                         name,
@@ -707,7 +727,8 @@ fn restore_backup_file(
     passphrase: Option<String>,
     preview_only: Option<bool>,
 ) -> Result<String, String> {
-    let p = Path::new(&path);
+    let granted = require_user_path(&path)?;
+    let p = granted.as_path();
     if !p.exists() {
         return Err("Backup file does not exist.".into());
     }
@@ -750,6 +771,9 @@ fn pick_folder(title: Option<String>) -> Result<Option<String>, String> {
     let dialog = rfd::FileDialog::new()
         .set_title(&title.unwrap_or_else(|| "Select Backup Folder".into()));
     let folder = dialog.pick_folder();
+    if let Some(ref p) = folder {
+        grant_user_path(p);
+    }
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
 
@@ -766,6 +790,9 @@ fn pick_save_file(
         .add_filter(&filter_name, &ext_refs)
         .add_filter("All Files", &["*"]);
     let file = dialog.save_file();
+    if let Some(ref p) = file {
+        grant_user_path(p);
+    }
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
@@ -777,11 +804,15 @@ fn pick_open_file(filter_name: String, extensions: Vec<String>) -> Result<Option
         .add_filter(&filter_name, &ext_refs)
         .add_filter("All Files", &["*"]);
     let file = dialog.pick_file();
+    if let Some(ref p) = file {
+        grant_user_path(p);
+    }
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
 fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
+    let path = require_user_path(&path)?;
     let bytes = BASE64_STANDARD
         .decode(&base64_data)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
@@ -791,12 +822,14 @@ fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
 
 #[tauri::command]
 fn read_binary_file(path: String) -> Result<String, String> {
+    let path = require_user_path(&path)?;
     let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
 #[tauri::command]
 fn write_text_file(path: String, content: String, add_bom: bool) -> Result<(), String> {
+    let path = require_user_path(&path)?;
     if add_bom {
         let mut bytes = vec![0xEF, 0xBB, 0xBF];
         bytes.extend_from_slice(content.as_bytes());
@@ -808,6 +841,7 @@ fn write_text_file(path: String, content: String, add_bom: bool) -> Result<(), S
 
 #[tauri::command]
 fn copy_db_file(target_path: String) -> Result<(), String> {
+    let target_path = require_user_path(&target_path)?;
     let db_path = get_active_db_path();
     fs::copy(&db_path, &target_path).map_err(|e| format!("Failed to export encrypted SQLite DB: {}", e))?;
     Ok(())
@@ -864,17 +898,11 @@ fn save_auth_config(config_json: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn wrap_vault_secret_for_credential(credential_id: String, secret: String) -> Result<String, String> {
-    let db_path = get_active_db_path();
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    init_schema(&conn)?;
-    let salt = ensure_vault_salt(&conn)?;
-    let key = derive_aes256_key(&format!("koban-passkey-wrap:{}", credential_id), &salt);
-    let (nonce_b64, ct_b64) = encrypt_aes256_gcm(&key, secret.as_bytes())?;
-    Ok(format!("{}.{}", nonce_b64, ct_b64))
-}
-
+/// Legacy read path only. Older builds stored the vault passphrase in a passkey record, encrypted with
+/// a key derived from the credential id and the vault salt. Both are plaintext in koban.db, so this
+/// "wrapping" never protected the passphrase; new credentials no longer get one (the former
+/// `wrap_vault_secret_for_credential` command was removed). Kept so existing records still unlock
+/// until the v2 vault format replaces them (docs/VAULT-V2-SPEC.md).
 #[tauri::command]
 fn unwrap_vault_secret_for_credential(
     credential_id: String,
@@ -906,7 +934,7 @@ fn move_database_location(target_folder: String) -> Result<DbInfo, String> {
         return Err("Target folder path cannot be empty.".into());
     }
 
-    let target_input = PathBuf::from(trimmed);
+    let target_input = require_user_path(trimmed)?;
     let target_db_path = if target_input.extension().and_then(|s| s.to_str()) == Some("db") {
         target_input
     } else {
@@ -1801,7 +1829,6 @@ pub fn run() {
             reveal_in_explorer,
             get_auth_config,
             save_auth_config,
-            wrap_vault_secret_for_credential,
             unwrap_vault_secret_for_credential,
             check_windows_hello_available,
             verify_windows_hello,
@@ -1817,4 +1844,70 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_commands_reject_paths_not_chosen_by_the_user() {
+        let dir = env::temp_dir().join(format!("koban-path-grant-test-{}", now_secs()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("export.csv");
+        let file_str = file.to_string_lossy().to_string();
+
+        assert!(write_text_file(file_str.clone(), "a,b".into(), false).is_err());
+        assert!(read_binary_file(file_str.clone()).is_err());
+        assert!(!file.exists());
+
+        grant_user_path(&file);
+        write_text_file(file_str.clone(), "a,b".into(), false).unwrap();
+        assert_eq!(read_binary_file(file_str).unwrap(), BASE64_STANDARD.encode(b"a,b"));
+
+        let other = dir.join("other.csv").to_string_lossy().to_string();
+        assert!(write_binary_file(other, BASE64_STANDARD.encode(b"x")).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vault_round_trip_and_wrong_passphrase() {
+        let dir = env::temp_dir().join(format!("koban-vault-test-{}", now_secs()));
+        fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("koban.db");
+        let state = r#"{"groups":[{"id":"g1"}],"transactions":[{"id":"t1"},{"id":"t2"}]}"#;
+
+        let mut conn = Connection::open(&db).unwrap();
+        init_schema(&conn).unwrap();
+        // 1 ledger_state row + 1 group + 2 transactions
+        assert_eq!(write_encrypted_state(&mut conn, state).unwrap(), 4);
+        drop(conn);
+
+        let conn = Connection::open(&db).unwrap();
+        init_schema(&conn).unwrap();
+        assert_eq!(read_encrypted_state(&conn, None).unwrap().as_deref(), Some(state));
+        assert!(read_encrypted_state(&conn, Some("wrong passphrase")).is_err());
+
+        // Nothing readable is left in the file.
+        let raw = fs::read(&db).unwrap();
+        assert!(!raw.windows(b"\"transactions\"".len()).any(|w| w == b"\"transactions\""));
+        drop(conn);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn listed_backups_are_granted() {
+        let dir = env::temp_dir().join(format!("koban-backup-grant-test-{}", now_secs()));
+        fs::create_dir_all(&dir).unwrap();
+        let backup = dir.join("koban-daily-1.db");
+        fs::write(&backup, b"not a real db").unwrap();
+
+        let listed = list_backups(dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(require_user_path(&listed[0].path).is_ok());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

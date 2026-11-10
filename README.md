@@ -24,8 +24,9 @@ A modern, minimalist paper-and-ink budgeting and business expense application fo
 - **📈 Reports, Breakdowns & Charts**:
   - Outflow Breakdown Donut Chart, Budget vs. Actual Horizontal Comparison Bars, 12-Month Annual Cashflow Trajectory, Top Expense Drivers, and Freelancer VAT & Tax Reserve Summary.
 - **🔒 AES-256-GCM Encrypted SQLite Database & Automatic Backups**:
-  - Every financial record in `koban.db` (`encrypted_vault` and `encrypted_records`) is encrypted at rest using **AES-256-GCM** with unique 96-bit random nonces per row and salted SHA-256 key derivation, plus an optional custom vault passphrase.
-  - Automatic background backups (`koban-latest.db` + rolling `.db` snapshots) to any user-chosen folder path remain fully encrypted at rest.
+  - The ledger in `koban.db` is stored as **AES-256-GCM** ciphertext with a random 96-bit nonce per write. The key is derived from your **custom vault passphrase** and a per-vault salt.
+  - ⚠️ **Without a custom passphrase the vault uses a built-in default key and is not protected** against anyone who has a copy of the file. Set a passphrase in **Backups & Exports**. See [SECURITY.md](SECURITY.md) for the current limitations and [docs/VAULT-V2-SPEC.md](docs/VAULT-V2-SPEC.md) for the planned replacement.
+  - Automatic background backups (`koban-latest.db` + rolling `.db` snapshots) are byte copies of the vault and open with the same passphrase.
 - **📥 Import Data & 📤 External Excel (`.xlsx`) / CSV (`.csv`) Exports**:
   - Dedicated **Import Data** workflow (`Ctrl+I`) supporting:
     - **Monthly Budget Sheets** (`.xlsx`, `.xls`, `.csv` — both 2-column and flat category layouts)
@@ -54,4 +55,14 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-The tag sets the app version (plain `vMAJOR.MINOR.PATCH`, as required by MSI).
+The tag sets the app version (plain `vMAJOR.MINOR.PATCH`, as required by MSI). Each release includes `SHA256SUMS.txt` for the installers.
+
+---
+
+## 🛡️ Security
+
+Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in public issues.
+
+## 📄 License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).

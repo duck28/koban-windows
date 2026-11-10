@@ -1,0 +1,60 @@
+# Type-checks and builds the frontend, lints and tests the Rust backend, and audits dependencies
+# on every push to main and every pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit npm dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      # Also produces ../dist, which tauri::generate_context! embeds when the Rust crate compiles.
+      - name: Type-check and build frontend
+        run: npm run build
+
+      # Correctness and suspicious-code lints fail the build; style lints are reported only
+      # (the existing code has ~20 style findings; tighten to `-D warnings` once they are cleaned up).
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D clippy::correctness -D clippy::suspicious
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Audit Rust dependencies
+        working-directory: src-tauri
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit

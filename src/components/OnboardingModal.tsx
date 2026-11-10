@@ -335,7 +335,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         userDisplayName: cleanName,
         credentialLabel: 'Windows Hello / Passkey',
         preferMode: 'auto',
-        vaultSecretToWrap: vaultPassphrase.trim() || undefined,
       });
       const nextAuth: AuthConfig = {
         ...authConfig,
@@ -1350,7 +1349,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   <div className="md:col-span-8 flex items-center gap-2">
                     <input
                       type="text"
-                      placeholder="Backup Folder: e.g. C:\Users\Roland Matuz\Backups\Koban"
+                      placeholder="Backup Folder: e.g. D:\Backups\Koban"
                       value={backupDir}
                       onChange={(e) => setBackupDir(e.target.value)}
                       className="flex-1 h-9 px-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"

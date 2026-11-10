@@ -192,12 +192,14 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                 Vault Encryption Key Mode:{' '}
                 <span className="text-positive">
                   {dbInfo?.has_custom_passphrase
-                    ? 'Custom Passphrase Active (PBKDF2-SHA256 + AES-256-GCM)'
-                    : 'Automatic Hardware/App Key (AES-256-GCM)'}
+                    ? 'Custom Passphrase Active (salted SHA-256 KDF + AES-256-GCM)'
+                    : 'Built-in Default Key (AES-256-GCM)'}
                 </span>
               </div>
               <p className="text-[11px] text-ink-3">
-                Every category, budget, and transaction row in SQLite is stored as authenticated AES-256-GCM ciphertext.
+                {dbInfo?.has_custom_passphrase
+                  ? 'The ledger is stored as authenticated AES-256-GCM ciphertext, keyed by your passphrase.'
+                  : 'The default key is built into the app: anyone with a copy of koban.db or a backup can decrypt it. Set a custom passphrase to protect your data.'}
               </p>
             </div>
           </div>

@@ -349,10 +349,11 @@ export function App() {
     await saveAuthConfig(next);
   };
 
+  /** Returns false (and stays locked) when the vault could not be decrypted with what was provided. */
   const handleUnlockSuccess = async (opts: {
     unlockedVaultSecret?: string;
     updatedConfig?: AuthConfig;
-  }) => {
+  }): Promise<boolean> => {
     if (opts.updatedConfig) {
       setAuthConfig(opts.updatedConfig);
       await saveAuthConfig(opts.updatedConfig);
@@ -367,6 +368,11 @@ export function App() {
         }
       }
     }
+    if (saveBlockedRef.current) {
+      // The vault is still encrypted with a passphrase this session does not have (e.g. a passkey
+      // without a stored secret, or a wrong passphrase). Opening the app would show an empty ledger.
+      return false;
+    }
     setIsLocked(false);
     showNotification(
       `Signed in as ${
@@ -375,6 +381,7 @@ export function App() {
         'Koban Owner'
       }.`
     );
+    return true;
   };
 
   // Inactivity Auto-Lock Timer

@@ -10,10 +10,27 @@ import {
   WebDavSyncResult,
 } from '../types';
 
+/**
+ * Browser-preview storage only (`npm run dev` without Tauri). Despite the legacy key name this is
+ * NOT encrypted: older desktop builds mirrored the full ledger here as base64 on every save, which
+ * left a plaintext copy in the WebView2 profile. The desktop app no longer writes it and removes it
+ * once the ledger is safely in the encrypted SQLite vault.
+ */
 const LOCAL_STORAGE_KEY = 'koban_encrypted_vault_v1';
+const LEGACY_LEDGER_STORAGE_KEYS = [LOCAL_STORAGE_KEY, 'koban_state_v1', 'zenledger_state_v1'];
 
 export function isTauriEnv(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** Desktop only: drops plaintext ledger copies left in WebView2 localStorage by older builds. */
+function purgeLegacyLedgerCopies(): void {
+  if (!isTauriEnv()) return;
+  try {
+    for (const key of LEGACY_LEDGER_STORAGE_KEYS) localStorage.removeItem(key);
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export async function getDatabaseInfo(): Promise<DbInfo> {
@@ -22,10 +39,10 @@ export async function getDatabaseInfo(): Promise<DbInfo> {
   }
   const raw = localStorage.getItem(LOCAL_STORAGE_KEY) ?? '';
   return {
-    db_path: 'Local Encrypted Storage (AES-256-GCM)',
+    db_path: 'Browser preview storage (not encrypted)',
     db_size: new Blob([raw]).size,
     last_modified: Math.floor(Date.now() / 1000),
-    encrypted: true,
+    encrypted: false,
     cipher: 'AES-256-GCM',
     encrypted_records: raw ? 1 : 0,
     has_custom_passphrase: false,
@@ -269,9 +286,14 @@ export async function loadLedgerFromDb(
         passphrase: passphrase ?? null,
       });
       if (jsonStr) {
-        return JSON.parse(jsonStr) as LedgerState;
+        const parsed = JSON.parse(jsonStr) as LedgerState;
+        // The encrypted vault holds the ledger, so a leftover plaintext copy is no longer needed.
+        purgeLegacyLedgerCopies();
+        return parsed;
       }
     }
+    // Browser preview storage; on desktop this is only a one-time recovery source for an empty
+    // vault and is purged after the next successful encrypted save.
     const fallback = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (fallback) {
       const decoded = atob(fallback);
@@ -285,12 +307,14 @@ export async function loadLedgerFromDb(
 
 export async function saveLedgerToDb(state: LedgerState): Promise<SaveResult> {
   const jsonStr = JSON.stringify(state);
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, btoa(unescape(encodeURIComponent(jsonStr))));
-    localStorage.removeItem('koban_state_v1');
-    localStorage.removeItem('zenledger_state_v1');
-  } catch {
-    // ignore storage quota errors
+  if (!isTauriEnv()) {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, btoa(unescape(encodeURIComponent(jsonStr))));
+      localStorage.removeItem('koban_state_v1');
+      localStorage.removeItem('zenledger_state_v1');
+    } catch {
+      // ignore storage quota errors
+    }
   }
 
   if (isTauriEnv()) {
@@ -300,6 +324,7 @@ export async function saveLedgerToDb(state: LedgerState): Promise<SaveResult> {
       autoBackup: state.settings.autoBackup,
       maxBackups: state.settings.maxBackups || 20,
     });
+    purgeLegacyLedgerCopies();
 
     // Backup mode: unchanged fire-and-forget overwrite after each save.
     // Primary mode is driven by the WebDAV sync engine (useWebDavSync) instead.

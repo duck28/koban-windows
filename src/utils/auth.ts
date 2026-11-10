@@ -33,11 +33,22 @@ function base64UrlToUint8Array(base64Url: string): Uint8Array {
   return out;
 }
 
+/** Desktop only: older builds also mirrored the auth config into WebView2 localStorage. */
+function purgeLegacyAuthCopy(): void {
+  if (!isTauriEnv()) return;
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export async function loadAuthConfig(): Promise<AuthConfig> {
   try {
     if (isTauriEnv()) {
       const raw = await invoke<string | null>('get_auth_config');
       if (raw) {
+        purgeLegacyAuthCopy();
         const parsed = JSON.parse(raw) as Partial<AuthConfig>;
         return {
           ...DEFAULT_AUTH_CONFIG,
@@ -63,13 +74,15 @@ export async function loadAuthConfig(): Promise<AuthConfig> {
 
 export async function saveAuthConfig(config: AuthConfig): Promise<void> {
   const json = JSON.stringify(config);
+  if (isTauriEnv()) {
+    await invoke('save_auth_config', { configJson: json });
+    purgeLegacyAuthCopy();
+    return;
+  }
   try {
     localStorage.setItem(AUTH_STORAGE_KEY, json);
   } catch {
     // ignore storage quota errors
-  }
-  if (isTauriEnv()) {
-    await invoke('save_auth_config', { configJson: json });
   }
 }
 
@@ -115,20 +128,13 @@ export async function checkBiometricPasskeySupport(): Promise<{
   };
 }
 
-async function wrapVaultSecret(
-  credentialId: string,
-  secret?: string
-): Promise<string | undefined> {
-  if (!secret || !secret.trim()) return undefined;
-  if (isTauriEnv()) {
-    return invoke<string>('wrap_vault_secret_for_credential', {
-      credentialId,
-      secret: secret.trim(),
-    });
-  }
-  return btoa(unescape(encodeURIComponent(secret.trim())));
-}
-
+/**
+ * Legacy only. Older builds stored the vault passphrase in `wrappedVaultSecret`, encrypted with a key
+ * derived from the credential id and the vault salt — both plaintext in the same file, so the
+ * passphrase was recoverable from koban.db alone. New credentials never get a wrapped secret; existing
+ * ones are still read so users who rely on them are not locked out before the v2 vault format
+ * (docs/VAULT-V2-SPEC.md) migrates them.
+ */
 export async function unwrapVaultSecret(
   credentialId: string,
   wrappedToken?: string
@@ -151,7 +157,6 @@ export async function registerPasskeyOrWindowsHello(opts: {
   userDisplayName: string;
   credentialLabel?: string;
   preferMode?: 'auto' | 'webauthn' | 'windows_hello';
-  vaultSecretToWrap?: string;
 }): Promise<PasskeyCredentialRecord> {
   const preferMode = opts.preferMode ?? 'auto';
   const now = Math.floor(Date.now() / 1000);
@@ -206,10 +211,6 @@ export async function registerPasskeyOrWindowsHello(opts: {
         const publicKeyB64 = pubKeyBuf
           ? bufferToBase64Url(pubKeyBuf)
           : undefined;
-        const wrappedVaultSecret = await wrapVaultSecret(
-          credentialId,
-          opts.vaultSecretToWrap
-        );
 
         return {
           id: credentialId,
@@ -220,7 +221,6 @@ export async function registerPasskeyOrWindowsHello(opts: {
           createdAt: now,
           lastUsedAt: now,
           publicKeyB64,
-          wrappedVaultSecret,
         };
       }
     } catch (webauthnErr) {
@@ -244,10 +244,6 @@ export async function registerPasskeyOrWindowsHello(opts: {
     const randomIdBytes = new Uint8Array(16);
     crypto.getRandomValues(randomIdBytes);
     const credentialId = `winhello-${bufferToBase64Url(randomIdBytes)}`;
-    const wrappedVaultSecret = await wrapVaultSecret(
-      credentialId,
-      opts.vaultSecretToWrap
-    );
 
     return {
       id: credentialId,
@@ -255,7 +251,6 @@ export async function registerPasskeyOrWindowsHello(opts: {
       kind: 'windows_hello_native',
       createdAt: now,
       lastUsedAt: now,
-      wrappedVaultSecret,
     };
   }
 

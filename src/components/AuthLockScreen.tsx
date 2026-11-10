@@ -28,11 +28,15 @@ import { LanguageSelect } from './LanguageSelect';
 interface AuthLockScreenProps {
   authConfig: AuthConfig;
   hasCustomDbPassphrase?: boolean;
+  /** Resolves false when the vault stays encrypted (no or wrong vault passphrase). */
   onUnlockSuccess: (opts: {
     unlockedVaultSecret?: string;
     updatedConfig?: AuthConfig;
-  }) => void;
+  }) => Promise<boolean>;
 }
+
+const VAULT_STILL_LOCKED_MSG =
+  'This vault is encrypted with a custom passphrase. Enter the correct passphrase to decrypt it.';
 
 export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
   authConfig,
@@ -102,10 +106,14 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
           passkeys: updatedPasskeys,
         };
         setStatusMsg('Verified via Passkey / Windows Hello.');
-        onUnlockSuccess({
+        const unlocked = await onUnlockSuccess({
           unlockedVaultSecret: res.unwrappedVaultSecret,
           updatedConfig: nextConfig,
         });
+        if (!unlocked) {
+          setStatusMsg(null);
+          setErrorMsg(VAULT_STILL_LOCKED_MSG);
+        }
       }
     } catch (err) {
       setStatusMsg(null);
@@ -138,9 +146,10 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
           return;
         }
       }
-      onUnlockSuccess({
+      const unlocked = await onUnlockSuccess({
         unlockedVaultSecret: trimmed,
       });
+      if (!unlocked) setErrorMsg(VAULT_STILL_LOCKED_MSG);
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : 'Failed to verify passphrase.'
@@ -171,7 +180,6 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
               ? 'Windows Hello (This PC)'
               : 'Windows Hello / Passkey',
           preferMode,
-          vaultSecretToWrap: secretToWrap,
         });
 
       let nextConfig: AuthConfig = {
@@ -191,10 +199,14 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
         };
       }
 
-      onUnlockSuccess({
+      const unlocked = await onUnlockSuccess({
         unlockedVaultSecret: secretToWrap,
         updatedConfig: nextConfig,
       });
+      if (!unlocked) {
+        setStatusMsg(null);
+        setErrorMsg(VAULT_STILL_LOCKED_MSG);
+      }
     } catch (err) {
       setStatusMsg(null);
       setErrorMsg(
@@ -233,10 +245,11 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
         passphraseSaltB64: saltB64,
         passphraseVerifierHashB64: hashB64,
       };
-      onUnlockSuccess({
+      const unlocked = await onUnlockSuccess({
         unlockedVaultSecret: p1,
         updatedConfig: nextConfig,
       });
+      if (!unlocked) setErrorMsg(VAULT_STILL_LOCKED_MSG);
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : 'Failed to configure passphrase.'

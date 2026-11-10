@@ -3,6 +3,7 @@ name = "koban"
 version = "0.1.0"
 description = "Koban for Windows: Minimalist Home & Freelancer Budgeting"
 authors = ["Roland Matuz"]
+license = "Apache-2.0"
 edition = "2024"
 
 [lib]
@@ -19,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.15"
 base64 = "0.22"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 aes-gcm = "0.10"
 sha2 = "0.10"
 getrandom = "0.2"
