@@ -28,9 +28,14 @@ import { LanguageSelect } from './LanguageSelect';
 interface AuthLockScreenProps {
   authConfig: AuthConfig;
   hasCustomDbPassphrase?: boolean;
-  /** Resolves false when the vault stays encrypted (no or wrong vault passphrase). */
+  /**
+   * Resolves false when the vault stays encrypted (no or wrong vault passphrase).
+   * `adoptAsVaultPassphrase`: a verified master passphrase that should also become the vault
+   * passphrase when the vault still uses the built-in default key.
+   */
   onUnlockSuccess: (opts: {
     unlockedVaultSecret?: string;
+    adoptAsVaultPassphrase?: boolean;
     updatedConfig?: AuthConfig;
   }) => Promise<boolean>;
 }
@@ -138,16 +143,19 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
     setErrorMsg(null);
     setIsBusy(true);
     try {
-      if (authConfig.hasMasterPassphrase) {
-        const valid = await verifyMasterPassphrase(trimmed, authConfig);
-        if (!valid) {
-          setErrorMsg('Incorrect Master Passphrase or PIN. Please try again.');
-          setIsBusy(false);
-          return;
-        }
+      const masterValid =
+        authConfig.hasMasterPassphrase &&
+        (await verifyMasterPassphrase(trimmed, authConfig));
+      // A vault with a custom passphrase is the real check: its passphrase may differ from the
+      // master passphrase, and decryption (in onUnlockSuccess) decides whether it is correct.
+      if (authConfig.hasMasterPassphrase && !masterValid && !hasCustomDbPassphrase) {
+        setErrorMsg('Incorrect Master Passphrase or PIN. Please try again.');
+        setIsBusy(false);
+        return;
       }
       const unlocked = await onUnlockSuccess({
         unlockedVaultSecret: trimmed,
+        adoptAsVaultPassphrase: masterValid,
       });
       if (!unlocked) setErrorMsg(VAULT_STILL_LOCKED_MSG);
     } catch (err) {
@@ -201,6 +209,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
 
       const unlocked = await onUnlockSuccess({
         unlockedVaultSecret: secretToWrap,
+        adoptAsVaultPassphrase: Boolean(secretToWrap),
         updatedConfig: nextConfig,
       });
       if (!unlocked) {
@@ -247,6 +256,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
       };
       const unlocked = await onUnlockSuccess({
         unlockedVaultSecret: p1,
+        adoptAsVaultPassphrase: true,
         updatedConfig: nextConfig,
       });
       if (!unlocked) setErrorMsg(VAULT_STILL_LOCKED_MSG);

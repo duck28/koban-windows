@@ -20,13 +20,27 @@ import {
   saveTextFile,
 } from './storage';
 
-function escapeCsvCell(val: string | number | null | undefined): string {
+/**
+ * CSV cell encoding. Text starting with `=`, `+`, `-`, `@`, tab or CR is run as a formula by
+ * Excel / LibreOffice (e.g. `=HYPERLINK(...)` in an imported transaction description), so it gets a
+ * leading `'`. Plain numbers such as `-12.50` are left untouched.
+ */
+export function escapeCsvCell(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return '';
-  const s = String(val);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+  let s = String(val);
+  if (typeof val === 'string' && /^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+([.,]\d+)?$/.test(s)) {
+    s = `'${s}`;
+  }
+  if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
+}
+
+/** A percentage from an imported file: finite and within 0–100, otherwise the fallback. */
+function clampPercent(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value === 0) return fallback;
+  return Math.min(100, Math.max(0, value));
 }
 
 function rowsToCsv(rows: (string | number | null | undefined)[][]): string {
@@ -921,7 +935,8 @@ export function importTransactionsFromBuffer(
 
     const rawAmtStr = findVal(['amount', 'total', 'value', 'sum', 'betrag', 'chf', 'eur']);
     const rawNum = parseFloat(rawAmtStr.replace(/[^0-9.-]/g, ''));
-    if (Number.isNaN(rawNum) || Math.abs(rawNum) < 0.001) continue;
+    // Non-finite amounts (a very long digit string parses to Infinity) would be stored as null.
+    if (!Number.isFinite(rawNum) || Math.abs(rawNum) < 0.001) continue;
 
     const rawDate = findVal(['date', 'datum', 'booking date', 'valuta']);
     let isoDate = `${fallbackMonthKey}-08`;
@@ -940,10 +955,11 @@ export function importTransactionsFromBuffer(
     const rawType = findVal(['type', 'kind', 'direction']).toLowerCase();
     const rawClient = findVal(['client', 'customer', 'project']);
     const rawInvoice = findVal(['invoiceref', 'invoice', 'reference', 'ref']);
-    const rawVat = parseFloat(findVal(['taxratepct', 'vat', 'tax', 'mwst'])) || 0;
-    const rawDed =
-      parseFloat(findVal(['deductiblepct', 'deductible'])) ||
-      (targetMode === 'freelancer' ? 100 : 0);
+    const rawVat = clampPercent(parseFloat(findVal(['taxratepct', 'vat', 'tax', 'mwst'])), 0);
+    const rawDed = clampPercent(
+      parseFloat(findVal(['deductiblepct', 'deductible'])),
+      targetMode === 'freelancer' ? 100 : 0
+    );
 
     // Match category by name if provided
     let matchedCat = rawCatName

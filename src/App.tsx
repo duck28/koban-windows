@@ -141,6 +141,25 @@ function keepDeviceWebDav(loaded: LedgerState, local?: WebDavConfig): LedgerStat
   return { ...loaded, settings: { ...loaded.settings, webdav: merged } };
 }
 
+/**
+ * An imported or restored ledger must not change where this device sends its data: a crafted
+ * backup could otherwise point WebDAV sync or the backup folder at an attacker (and prune the
+ * local backup history). The current device's settings for these always win.
+ */
+function keepDeviceSettings(incoming: LedgerState, current: LedgerState): LedgerState {
+  if (!incoming.settings || !current.settings) return incoming;
+  return {
+    ...incoming,
+    settings: {
+      ...incoming.settings,
+      webdav: current.settings.webdav,
+      backupDir: current.settings.backupDir,
+      autoBackup: current.settings.autoBackup,
+      maxBackups: current.settings.maxBackups,
+    },
+  };
+}
+
 export function App() {
   const [state, setState] = useState<LedgerState>(() =>
     createInitialLedgerState('both', 'CHF', '', false)
@@ -352,6 +371,7 @@ export function App() {
   /** Returns false (and stays locked) when the vault could not be decrypted with what was provided. */
   const handleUnlockSuccess = async (opts: {
     unlockedVaultSecret?: string;
+    adoptAsVaultPassphrase?: boolean;
     updatedConfig?: AuthConfig;
   }): Promise<boolean> => {
     if (opts.updatedConfig) {
@@ -366,6 +386,18 @@ export function App() {
         if (!reloaded.settings.setupCompleted) {
           setShowSetupModal(true);
         }
+      } else if (hasCustomDbPassphrase) {
+        // The vault has its own passphrase and this input did not decrypt it: stay locked, even if
+        // the ledger is still in memory from before an auto-lock.
+        return false;
+      } else if (opts.adoptAsVaultPassphrase && !saveBlockedRef.current) {
+        // A verified master passphrase on a vault that still uses the built-in default key: encrypt
+        // the vault with it (older builds did this implicitly on the next save).
+        const info = await updateVaultPassphrase(
+          opts.unlockedVaultSecret,
+          latestStateRef.current
+        );
+        setHasCustomDbPassphrase(Boolean(info?.has_custom_passphrase));
       }
     }
     if (saveBlockedRef.current) {
@@ -452,6 +484,8 @@ export function App() {
   // Global keyboard shortcuts (oriented on ZenPDF)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // No app shortcuts on the lock screen (e.g. Ctrl+S could set a new backup folder).
+      if (isLocked) return;
       const target = e.target as HTMLElement | null;
       const inInput =
         target &&
@@ -509,7 +543,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [state]);
+  }, [state, isLocked]);
 
   const monthKey = formatMonthKey(
     state.settings.activeYear,
@@ -669,7 +703,8 @@ export function App() {
     }
 
     if (opts.vaultPassphrase !== undefined) {
-      await updateVaultPassphrase(opts.vaultPassphrase || null, nextState);
+      const info = await updateVaultPassphrase(opts.vaultPassphrase || null, nextState);
+      setHasCustomDbPassphrase(Boolean(info?.has_custom_passphrase));
     }
 
     setShowSetupModal(false);
@@ -681,7 +716,9 @@ export function App() {
   };
 
   const handleUpdateVaultPassphrase = async (passphrase: string | null) => {
-    await updateVaultPassphrase(passphrase, state);
+    const info = await updateVaultPassphrase(passphrase, state);
+    // Keeps the lock screen's "this vault has its own passphrase" check in step.
+    setHasCustomDbPassphrase(Boolean(info?.has_custom_passphrase));
     showNotification(
       passphrase
         ? 'Updated AES-256-GCM vault to use your custom passphrase.'
@@ -1635,7 +1672,7 @@ export function App() {
       const restored = await restoreFromBackupFile(path, passphrase, false);
       // The local DB was replaced: it no longer matches the last WebDAV sync.
       webdavSync.resetLink();
-      setState(restored);
+      setState(keepDeviceSettings(restored, latestStateRef.current));
       showNotification('Encrypted database restored from backup snapshot.', path);
     } catch (err) {
       showNotification(`Restore failed: ${String(err)}`);
@@ -1805,7 +1842,7 @@ export function App() {
       await forgetWebDavSyncState().catch(() => undefined);
       webdavSync.resetLink();
     }
-    setState(preview.proposedState);
+    setState(keepDeviceSettings(preview.proposedState, latestStateRef.current));
     setShowImportModal(false);
     setShowSetupModal(false);
 

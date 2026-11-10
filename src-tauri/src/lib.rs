@@ -597,21 +597,23 @@ fn get_db_info() -> Result<DbInfo, String> {
 
 #[tauri::command]
 fn load_ledger_db(passphrase: Option<String>) -> Result<Option<String>, String> {
-    if let Some(ref p) = passphrase {
-        if !p.is_empty() {
-            if let Ok(mut guard) = SESSION_KEY.lock() {
-                guard.passphrase = Some(p.clone());
-            }
-        }
-    }
-
     let _guard = lock_db_file();
     let db_path = get_active_db_path();
     let mut conn = Connection::open(&db_path).map_err(|e| format!("Failed to open SQLite DB: {}", e))?;
     init_schema(&conn)?;
     migrate_and_drop_plaintext_tables(&mut conn)?;
 
-    read_encrypted_state(&conn, passphrase.as_deref())
+    let result = read_encrypted_state(&conn, passphrase.as_deref())?;
+    // Only a passphrase that actually decrypted the vault becomes the session key. Setting it before
+    // the check let any input typed at the lock screen re-encrypt the vault on the next save.
+    if result.is_some() {
+        if let Some(p) = passphrase.filter(|p| !p.is_empty()) {
+            if let Ok(mut guard) = SESSION_KEY.lock() {
+                guard.passphrase = Some(p);
+            }
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -688,6 +690,22 @@ fn trigger_manual_backup(
     })
 }
 
+/// File names Koban itself writes for vaults and backups (`koban.db`, `koban-latest.db`,
+/// `koban-daily-*.db`, `koban-backup-*.db`, `koban-encrypted-*.db`, `koban-pre-webdav-sync-*.db`, …).
+fn is_koban_vault_file_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let stem = lower
+        .strip_suffix(".db")
+        .or_else(|| lower.strip_suffix(".sqlite"));
+    match stem {
+        Some(s) => {
+            (s == "koban" || s.starts_with("koban-"))
+                && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        }
+        None => false,
+    }
+}
+
 #[tauri::command]
 fn list_backups(backup_dir: String) -> Result<Vec<BackupEntry>, String> {
     let p = Path::new(&backup_dir);
@@ -700,7 +718,10 @@ fn list_backups(backup_dir: String) -> Result<Vec<BackupEntry>, String> {
             let path = entry.path();
             if path.is_file() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.ends_with(".db") || name.ends_with(".sqlite") {
+                // `backup_dir` is not a dialog-granted folder (it persists across sessions), so only
+                // Koban's own vault files are listed and granted; otherwise any caller could unlock
+                // arbitrary .db files for the file commands by listing their folder.
+                if is_koban_vault_file_name(&name) {
                     grant_user_path(&path);
                     let meta = entry.metadata().ok();
                     list.push(BackupEntry {
@@ -847,8 +868,24 @@ fn copy_db_file(target_path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Only an existing, absolute, local path may be shown in Explorer. The path is passed with
+/// `raw_arg`, so a `"` would let a caller add its own Explorer arguments; UNC paths would contact
+/// a remote host (NTLM), and URIs (`search-ms:`, `ms-…:`) would be launched as protocol handlers.
+fn validate_reveal_path(path: &str) -> Result<(), String> {
+    let p = Path::new(path);
+    let unc = path.starts_with("\\\\") || path.starts_with("//");
+    if path.is_empty() || path.contains('"') || path.chars().any(|c| c.is_control()) || unc || !p.is_absolute() {
+        return Err("Only local folders and files can be shown in Explorer.".into());
+    }
+    if !p.exists() {
+        return Err("The file or folder does not exist.".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> Result<(), String> {
+    validate_reveal_path(&path)?;
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -918,13 +955,9 @@ fn unwrap_vault_secret_for_credential(
     let salt = ensure_vault_salt(&conn)?;
     let key = derive_aes256_key(&format!("koban-passkey-wrap:{}", credential_id), &salt);
     let decrypted = decrypt_aes256_gcm(&key, parts[0], parts[1])?;
-    let secret = String::from_utf8(decrypted).map_err(|e| e.to_string())?;
-    if !secret.is_empty() {
-        if let Ok(mut guard) = SESSION_KEY.lock() {
-            guard.passphrase = Some(secret.clone());
-        }
-    }
-    Ok(secret)
+    // Not made the session key here: the caller passes it to load_ledger_db, which adopts it only
+    // after it decrypts the vault.
+    String::from_utf8(decrypted).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1024,6 +1057,8 @@ const WEBDAV_TRANSFER_TIMEOUT_SECS: u64 = 120;
 const WEBDAV_CONNECT_TIMEOUT_SECS: u64 = 15;
 const WEBDAV_CONFLICT_PREFIX: &str = "WEBDAV_CONFLICT:";
 const WEBDAV_SYNC_STATE_VERSION: u32 = 1;
+/// Upper bound for a downloaded vault (a ledger is typically well under 10 MB).
+const WEBDAV_MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Per-device sync state stored next to the active DB as `<db file name>.webdav-sync.json`.
 /// Never synced; shared format with the macOS build.
@@ -1456,9 +1491,17 @@ fn webdav_download_bytes(
     let modified = header_string(&r, "Last-Modified");
     let mut data = Vec::new();
     use std::io::Read;
+    // A hostile server could stream without end; read at most one byte past the limit to detect it.
     r.into_reader()
+        .take(WEBDAV_MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut data)
         .map_err(|e| WebDavDownloadError::Transport(format!("Failed to download WebDAV file content: {}", e)))?;
+    if data.len() as u64 > WEBDAV_MAX_DOWNLOAD_BYTES {
+        return Err(WebDavDownloadError::Transport(format!(
+            "The WebDAV file is larger than {} MB and was not downloaded.",
+            WEBDAV_MAX_DOWNLOAD_BYTES / (1024 * 1024)
+        )));
+    }
     Ok((data, etag, modified))
 }
 
@@ -1607,6 +1650,30 @@ fn webdav_push_impl(
     }
 }
 
+/// Checks a vault file that arrived from WebDAV before it replaces the local one. Koban's schema has
+/// no triggers or views, and a file with the legacy plaintext `app_state` table would be migrated by
+/// `migrate_and_drop_plaintext_tables` — encrypting attacker-chosen JSON with this device's key, so
+/// it loads as if it were genuine. Opened read-only, so the check itself cannot run a hot journal.
+fn validate_downloaded_vault(path: &Path) -> Result<(), String> {
+    use rusqlite::OpenFlags;
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("Downloaded file is not a readable SQLite database: {}", e))?;
+    let suspicious: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type IN ('trigger', 'view')
+                OR (type = 'table' AND name IN ('app_state', 'category_groups', 'categories',
+                                                 'monthly_budgets', 'transactions', 'savings_goals'))",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("Downloaded file is not a valid Koban vault: {}", e))?;
+    if suspicious > 0 {
+        return Err("The downloaded file is not a Koban vault in the current format (it contains plaintext tables, triggers or views) and was not used.".into());
+    }
+    Ok(())
+}
+
 /// Downloads the remote vault into the active local DB path (works even when no local DB exists).
 fn webdav_pull_impl(
     url: String,
@@ -1653,9 +1720,18 @@ fn webdav_pull_impl(
                 let _ = fs::copy(&local_db, &backup_file);
             }
         }
+        // Write and check a temporary copy first, then swap it in with one rename.
+        let tmp = sidecar_path(&local_db, ".download-tmp");
+        fs::write(&tmp, &data).map_err(|e| format!("Failed to save downloaded database: {}", e))?;
+        if let Err(e) = validate_downloaded_vault(&tmp) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
         remove_sqlite_sidecars(&local_db);
-        fs::write(&local_db, &data)
-            .map_err(|e| format!("Failed to save downloaded database: {}", e))?;
+        fs::rename(&tmp, &local_db).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("Failed to replace the local database: {}", e)
+        })?;
     }
 
     let meta = WebDavRemoteMeta {
@@ -1759,33 +1835,50 @@ try {
     }
 }
 
+/// Prompt text for the Windows Hello dialog: control characters removed, length capped.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hello_prompt_message(message: Option<String>) -> String {
+    let cleaned: String = message
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    if cleaned.trim().is_empty() {
+        "Unlock Koban Encrypted Budget & Net Worth Vault".into()
+    } else {
+        cleaned
+    }
+}
+
 #[tauri::command]
 fn verify_windows_hello(message: Option<String>) -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let msg = message
-            .unwrap_or_else(|| "Unlock Koban Encrypted Budget & Net Worth Vault".into())
-            .replace('\'', "''");
-        let ps_script = format!(
-            r#"
+        let msg = hello_prompt_message(message);
+        // The prompt text can come from koban.db (display name), so it must never become part of the
+        // script source: PowerShell also treats typographic quotes (U+2018..U+201B) as string
+        // delimiters, which made the old `'` escaping injectable. It is passed as an environment
+        // variable and read as data instead.
+        const PS_SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
-try {{
+try {
     $null = [Windows.Security.Credentials.UI.UserConsentVerifier, Windows.Security.Credentials.UI, ContentType = WindowsRuntime]
     Add-Type -AssemblyName System.Runtime.WindowsRuntime
-    $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('{msg}')
-    $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+    $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync([string]$env:KOBAN_HELLO_MESSAGE)
+    $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
     $task = $asTask.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerificationResult]).Invoke($null, @($op))
     $res = $task.GetAwaiter().GetResult()
     Write-Output $res.ToString()
-}} catch {{
+} catch {
     Write-Output "ERROR:$($_.Exception.Message)"
-}}
-"#
-        );
+}
+"#;
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+            .args(["-NoProfile", "-NonInteractive", "-Command", PS_SCRIPT])
+            .env("KOBAN_HELLO_MESSAGE", msg)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| format!("Failed to invoke Windows Hello: {}", e))?;
@@ -1898,15 +1991,97 @@ mod tests {
     }
 
     #[test]
-    fn listed_backups_are_granted() {
+    fn listed_backups_are_granted_but_only_koban_files() {
         let dir = env::temp_dir().join(format!("koban-backup-grant-test-{}", now_secs()));
         fs::create_dir_all(&dir).unwrap();
         let backup = dir.join("koban-daily-1.db");
         fs::write(&backup, b"not a real db").unwrap();
+        let foreign = dir.join("wpndatabase.db");
+        fs::write(&foreign, b"someone else's database").unwrap();
 
         let listed = list_backups(dir.to_string_lossy().to_string()).unwrap();
         assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "koban-daily-1.db");
         assert!(require_user_path(&listed[0].path).is_ok());
+        assert!(require_user_path(&foreign.to_string_lossy()).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn koban_vault_file_names() {
+        for ok in ["koban.db", "koban-latest.db", "koban-daily-20400.db", "koban-backup-1731.db",
+                   "koban-encrypted-2026-11-10.db", "koban-pre-webdav-sync-1.db", "KOBAN-latest.sqlite"] {
+            assert!(is_koban_vault_file_name(ok), "{ok}");
+        }
+        for bad in ["wpndatabase.db", "kobanx.db", "koban-latest.json", "koban.db-wal", "koban-a b.db"] {
+            assert!(!is_koban_vault_file_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn hello_prompt_is_plain_data() {
+        assert_eq!(hello_prompt_message(None), "Unlock Koban Encrypted Budget & Net Worth Vault");
+        assert_eq!(hello_prompt_message(Some("a\u{2019}; calc\r\n".into())), "a\u{2019}; calc");
+        assert_eq!(hello_prompt_message(Some("x".repeat(500))).chars().count(), 200);
+    }
+
+    #[test]
+    fn reveal_rejects_injection_unc_uri_and_relative_paths() {
+        let dir = env::temp_dir();
+        let existing = dir.to_string_lossy().to_string();
+        assert!(validate_reveal_path(&existing).is_ok());
+        for bad in [
+            format!("{}\" /root,\"C:\\Windows\\System32\\calc.exe", existing),
+            "\\\\attacker\\share".to_string(),
+            "//attacker/share".to_string(),
+            "search-ms:query=x".to_string(),
+            "relative\\folder".to_string(),
+            String::new(),
+        ] {
+            assert!(validate_reveal_path(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn downloaded_vault_validation() {
+        let dir = env::temp_dir().join(format!("koban-download-test-{}", now_secs()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let good = dir.join("good.db");
+        {
+            let mut conn = Connection::open(&good).unwrap();
+            init_schema(&conn).unwrap();
+            write_encrypted_state(&mut conn, r#"{"groups":[]}"#).unwrap();
+        }
+        assert!(validate_downloaded_vault(&good).is_ok());
+
+        let legacy = dir.join("legacy.db");
+        {
+            let conn = Connection::open(&legacy).unwrap();
+            init_schema(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO app_state VALUES ('ledger_state', '{\"groups\":[]}');",
+            )
+            .unwrap();
+        }
+        assert!(validate_downloaded_vault(&legacy).is_err());
+
+        let trigger = dir.join("trigger.db");
+        {
+            let conn = Connection::open(&trigger).unwrap();
+            init_schema(&conn).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER keep_old BEFORE UPDATE ON encrypted_vault BEGIN SELECT RAISE(IGNORE); END;",
+            )
+            .unwrap();
+        }
+        assert!(validate_downloaded_vault(&trigger).is_err());
+
+        let not_sqlite = dir.join("junk.db");
+        fs::write(&not_sqlite, b"SQLite format 3\0 but not really").unwrap();
+        assert!(validate_downloaded_vault(&not_sqlite).is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }
