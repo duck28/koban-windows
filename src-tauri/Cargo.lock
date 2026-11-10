@@ -2034,7 +2034,7 @@ name = "koban"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
- "base64 0.22.1",
+ "base64 0.23.1",
  "getrandom 0.2.17",
  "rfd",
  "rusqlite",
