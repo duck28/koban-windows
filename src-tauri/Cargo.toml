@@ -23,7 +23,7 @@ base64 = "0.23"
 rusqlite = { version = "0.41", features = ["bundled"] }
 aes-gcm = "0.11"
 sha2 = "0.11"
-getrandom = "0.2"
+getrandom = "0.4"
 ureq = { version = "2.10", features = ["tls"] }
 
 [profile.release]
