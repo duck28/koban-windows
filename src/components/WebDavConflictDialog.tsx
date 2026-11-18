@@ -8,6 +8,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { WebDavConflictChoice, WebDavConflictInfo } from '../hooks/useWebDavSync';
+import { useI18n } from '../i18n';
 
 interface WebDavConflictDialogProps {
   info: WebDavConflictInfo;
@@ -34,16 +35,17 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
   errorMessage,
   onChoose,
 }) => {
+  const { t } = useI18n();
   const remoteTime = formatHttpDate(info.remoteLastModified);
   const localTime = formatSecs(info.localModified);
   const firstLink = info.firstLink;
 
   const title = firstLink
-    ? 'A Koban vault already exists at this WebDAV location'
-    : 'Cloud vault changed on another device';
+    ? t('webdav.conflictFirstTitle')
+    : t('webdav.conflictTitle');
   const body = firstLink
-    ? 'This device has never synced with this WebDAV file. Choose which data to keep — the other one is kept as a backup file.'
-    : 'Both the WebDAV copy and this device have changes since the last sync. Choose which version to keep — the other one is kept as a backup file.';
+    ? t('webdav.conflictFirstBody')
+    : t('webdav.conflictBody');
 
   const btnBase =
     'h-9 px-3.5 inline-flex items-center justify-center gap-1.5 rounded-lg text-xs cursor-pointer disabled:opacity-50 transition-colors';
@@ -72,16 +74,16 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
               <div className="p-2.5 rounded-lg bg-app border border-line">
                 <div className="flex items-center gap-1.5 text-ink-3">
                   <CloudDownload className="w-3.5 h-3.5 text-indigo" />
-                  <span>Cloud copy last modified</span>
+                  <span>{t('webdav.conflictRemoteModified')}</span>
                 </div>
-                <div className="mt-0.5 font-mono text-ink-2">{remoteTime ?? 'Unknown'}</div>
+                <div className="mt-0.5 font-mono text-ink-2">{remoteTime ?? t('webdav.conflictUnknown')}</div>
               </div>
               <div className="p-2.5 rounded-lg bg-app border border-line">
                 <div className="flex items-center gap-1.5 text-ink-3">
                   <Laptop className="w-3.5 h-3.5" />
-                  <span>This device last saved</span>
+                  <span>{t('webdav.conflictLocalSaved')}</span>
                 </div>
-                <div className="mt-0.5 font-mono text-ink-2">{localTime ?? 'Unknown'}</div>
+                <div className="mt-0.5 font-mono text-ink-2">{localTime ?? t('webdav.conflictUnknown')}</div>
               </div>
             </div>
           )}
@@ -101,7 +103,7 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
             className={`${btnBase} border border-line bg-surface text-ink hover:bg-raised`}
           >
             {!firstLink && <Clock className="w-3.5 h-3.5" />}
-            <span>{firstLink ? 'Cancel' : 'Decide later'}</span>
+            <span>{firstLink ? t('common.cancel') : t('webdav.conflictDecideLater')}</span>
           </button>
           <button
             type="button"
@@ -114,7 +116,7 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
             ) : (
               <CloudUpload className="w-3.5 h-3.5 text-indigo" />
             )}
-            <span>{firstLink ? 'Upload this device’s data' : 'Keep this device’s version'}</span>
+            <span>{firstLink ? t('webdav.conflictUploadLocal') : t('webdav.conflictKeepLocal')}</span>
           </button>
           <button
             type="button"
@@ -127,7 +129,7 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
             ) : (
               <CloudDownload className="w-3.5 h-3.5" />
             )}
-            <span>{firstLink ? 'Use the cloud vault' : 'Use cloud version'}</span>
+            <span>{firstLink ? t('webdav.conflictUseCloudFirst') : t('webdav.conflictUseCloud')}</span>
           </button>
         </div>
       </div>

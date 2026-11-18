@@ -35,6 +35,7 @@ import {
   formatNumber,
   NetWorthSummaryMetrics,
 } from '../utils/calculations';
+import { useI18n } from '../i18n';
 
 interface AccountsNetWorthViewProps {
   netWorth: NetWorthSummaryMetrics;
@@ -76,6 +77,16 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
   onDeleteSnapshot,
   onInspectAccountTransactions,
 }) => {
+  const {
+    t,
+    tf,
+    tAccountName,
+    tAccType,
+    tAccTypeShort,
+    tAccClass,
+    tAccClassOpt,
+    formatMonth,
+  } = useI18n();
   const [filterBucket, setFilterBucket] = useState<FilterBucket>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showTransferForm, setShowTransferForm] = useState(false);
@@ -112,14 +123,14 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
   );
   const [transferNote, setTransferNote] = useState('');
 
-  const handleTypeSelect = (t: AccountType) => {
-    setNewType(t);
-    const meta = ACCOUNT_TYPE_META[t];
+  const handleTypeSelect = (tp: AccountType) => {
+    setNewType(tp);
+    const meta = ACCOUNT_TYPE_META[tp];
     if (meta) {
       setNewClassification(meta.defaultClass);
       setNewAutoTrack(meta.autoTrackDefault);
       setNewColor(meta.defaultColor);
-      if (t === 'business_bank' || t === 'tax_reserve') {
+      if (tp === 'business_bank' || tp === 'tax_reserve') {
         setNewMode('freelancer');
       }
     }
@@ -137,7 +148,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
       type: newType,
       customTypeLabel:
         newType === 'custom'
-          ? newCustomTypeLabel.trim() || 'Custom Account'
+          ? newCustomTypeLabel.trim() || tAccTypeShort('custom')
           : undefined,
       classification: newClassification,
       startingBalance: bal,
@@ -165,7 +176,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
       toAccId,
       amt,
       transferDate,
-      transferNote.trim() || 'Account Transfer'
+      transferNote.trim() || t('accounts.transferBtn')
     );
     setTransferAmount('');
     setTransferNote('');
@@ -216,7 +227,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
     if (acc.type === 'custom' && acc.customTypeLabel) {
       return acc.customTypeLabel;
     }
-    return ACCOUNT_TYPE_META[acc.type]?.shortLabel ?? acc.type;
+    return tAccTypeShort(acc.type);
   };
 
   const getClassIcon = (cls: AccountLiquidityClass) => {
@@ -241,16 +252,15 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-[0.14em] text-ink-3 font-medium">
-              Multi-Account Treasury & Balance Sheet
+              {t('accounts.eyebrow')}
             </span>
             <span className="text-ink-3">·</span>
             <span className="text-[11px] text-ink-2 font-medium">
-              {netWorth.accounts.length} Active Account
-              {netWorth.accounts.length === 1 ? '' : 's'}
+              {tf('accounts.activeCount', { count: netWorth.accounts.length })}
             </span>
           </div>
           <h1 className="text-xl font-medium text-ink tracking-tight mt-0.5">
-            Accounts & Comprehensive Net Worth Tracker
+            {t('accounts.title')}
           </h1>
         </div>
 
@@ -261,10 +271,9 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               setSnapshotNote('');
             }}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
-            title={`Record Net Worth snapshot for ${monthKey}`}
           >
             <Camera className="w-3.5 h-3.5 text-indigo" />
-            <span>Snapshot {monthKey}</span>
+            <span>{tf('accounts.snapshotBtn', { month: monthKey })}</span>
           </button>
 
           {netWorth.accounts.length >= 2 && (
@@ -276,7 +285,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink hover:bg-raised transition-colors cursor-pointer"
             >
               <ArrowLeftRight className="w-3.5 h-3.5 text-positive" />
-              <span>Transfer Funds</span>
+              <span>{t('accounts.transferBtn')}</span>
             </button>
           )}
 
@@ -288,7 +297,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
             className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add Account</span>
+            <span>{t('accounts.addBtn')}</span>
           </button>
         </div>
       </div>
@@ -298,7 +307,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
         {/* 1. Total Net Worth */}
         <div className="p-4 rounded-xl bg-surface border border-ink/40 shadow-2xs space-y-1.5">
           <div className="flex items-center justify-between text-xs text-ink-2">
-            <span className="font-medium text-ink">Total Net Worth</span>
+            <span className="font-medium text-ink">{t('accounts.totalNetWorth')}</span>
             <Sparkles className="w-3.5 h-3.5 text-positive" />
           </div>
           <div
@@ -309,25 +318,25 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
             {formatCurrency(netWorth.netWorth, currency)}
           </div>
           <div className="flex items-center justify-between text-[11px] text-ink-3 tabular-nums">
-            <span>Assets: {formatCurrency(netWorth.totalAssets, currency)}</span>
-            <span>Debt: {netWorth.debtToAssetRatioPct.toFixed(1)}%</span>
+            <span>{tf('accounts.assetsLabel', { amount: formatCurrency(netWorth.totalAssets, currency) })}</span>
+            <span>{tf('accounts.debtLabel', { pct: netWorth.debtToAssetRatioPct.toFixed(1) })}</span>
           </div>
         </div>
 
         {/* 2. Liquid Assets (Multiple Bank Accounts & Cash) */}
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1.5">
           <div className="flex items-center justify-between text-xs text-ink-2">
-            <span>Liquid Assets (Bank & Cash)</span>
+            <span>{t('accounts.liquidAssets')}</span>
             <Landmark className="w-3.5 h-3.5 text-positive" />
           </div>
           <div className="text-lg font-semibold text-ink tabular-nums">
             {formatCurrency(netWorth.liquidAssets, currency)}
           </div>
           <div className="flex items-center justify-between text-[11px] text-ink-3 tabular-nums">
-            <span>{netWorth.liquidSharePct.toFixed(1)}% of assets</span>
+            <span>{tf('accounts.ofAssets', { pct: netWorth.liquidSharePct.toFixed(1) })}</span>
             {netWorth.liquidRunwayMonths > 0 && (
               <span className="text-positive font-medium">
-                {netWorth.liquidRunwayMonths.toFixed(1)} mo runway
+                {tf('accounts.moRunway', { months: netWorth.liquidRunwayMonths.toFixed(1) })}
               </span>
             )}
           </div>
@@ -336,22 +345,22 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
         {/* 3. Retirement & Pension Accounts */}
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1.5">
           <div className="flex items-center justify-between text-xs text-ink-2">
-            <span>Retirement & Pension</span>
+            <span>{t('accounts.retirementPension')}</span>
             <Shield className="w-3.5 h-3.5 text-[#8a6fb0]" />
           </div>
           <div className="text-lg font-semibold text-ink tabular-nums">
             {formatCurrency(netWorth.retirementAssets, currency)}
           </div>
           <div className="flex items-center justify-between text-[11px] text-ink-3 tabular-nums">
-            <span>Pillar 2 / 3a / Pension</span>
-            <span>{netWorth.retirementSharePct.toFixed(1)}% of assets</span>
+            <span>{t('accounts.pillarSummary')}</span>
+            <span>{tf('accounts.ofAssets', { pct: netWorth.retirementSharePct.toFixed(1) })}</span>
           </div>
         </div>
 
         {/* 4. Investments & Fixed Assets */}
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1.5">
           <div className="flex items-center justify-between text-xs text-ink-2">
-            <span>Investments & Fixed Assets</span>
+            <span>{t('accounts.investmentsFixed')}</span>
             <TrendingUp className="w-3.5 h-3.5 text-indigo" />
           </div>
           <div className="text-lg font-semibold text-ink tabular-nums">
@@ -361,12 +370,11 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
             )}
           </div>
           <div className="flex items-center justify-between text-[11px] text-ink-3 tabular-nums">
-            <span>ETFs, Crypto & Equity</span>
+            <span>{t('accounts.etfEquity')}</span>
             <span>
-              {(
-                netWorth.investmentSharePct + netWorth.fixedAssetSharePct
-              ).toFixed(1)}
-              % of assets
+              {tf('accounts.ofAssets', {
+                pct: (netWorth.investmentSharePct + netWorth.fixedAssetSharePct).toFixed(1),
+              })}
             </span>
           </div>
         </div>
@@ -374,15 +382,15 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
         {/* 5. Liabilities & Debt */}
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1.5">
           <div className="flex items-center justify-between text-xs text-ink-2">
-            <span>Liabilities & Debt</span>
+            <span>{t('accounts.liabilitiesDebt')}</span>
             <CreditCard className="w-3.5 h-3.5 text-accent" />
           </div>
           <div className="text-lg font-semibold text-accent tabular-nums">
             {formatCurrency(netWorth.totalLiabilities, currency)}
           </div>
           <div className="flex items-center justify-between text-[11px] text-ink-3 tabular-nums">
-            <span>Cards, Loans & Mortgages</span>
-            <span>Subtracted</span>
+            <span>{t('accounts.cardsLoans')}</span>
+            <span>{t('accounts.subtracted')}</span>
           </div>
         </div>
       </div>
@@ -396,10 +404,10 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           <div className="flex items-center justify-between pb-2 border-b border-line">
             <div>
               <h3 className="text-sm font-medium text-ink">
-                Create Financial Account
+                {t('accounts.createTitle')}
               </h3>
               <p className="text-[11px] text-ink-2">
-                Add a bank account, retirement fund, investment portfolio, credit card, loan, or define a custom account type.
+                {t('accounts.createDesc')}
               </p>
             </div>
             <button
@@ -407,41 +415,39 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               onClick={() => setShowAddForm(false)}
               className="text-xs text-ink-3 hover:text-ink cursor-pointer"
             >
-              Close
+              {t('common.close')}
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Account Type
+                {t('accounts.accountTypeLabel')}
               </label>
               <select
                 value={newType}
                 onChange={(e) => handleTypeSelect(e.target.value as AccountType)}
                 className="w-full h-9 px-2.5 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
               >
-                <optgroup label="Liquid Bank & Cash Accounts">
-                  <option value="checking">Bank Checking / Everyday Account</option>
-                  <option value="savings">Bank Savings / High-Yield Account</option>
-                  <option value="business_bank">Freelancer / Business Bank Account</option>
-                  <option value="tax_reserve">Tax & VAT Reserve Account</option>
-                  <option value="cash">Cash / Digital Wallet</option>
+                <optgroup label={t('accounts.groupLiquid')}>
+                  <option value="checking">{tAccType('checking')}</option>
+                  <option value="savings">{tAccType('savings')}</option>
+                  <option value="business_bank">{tAccType('business_bank')}</option>
+                  <option value="tax_reserve">{tAccType('tax_reserve')}</option>
+                  <option value="cash">{tAccType('cash')}</option>
                 </optgroup>
-                <optgroup label="Retirement & Long-Term Wealth">
-                  <option value="retirement">
-                    Retirement / Pension (Pillar 2 / 3a / 401k / IRA)
-                  </option>
-                  <option value="brokerage">Brokerage / ETFs & Stocks</option>
-                  <option value="crypto">Crypto & Digital Assets</option>
-                  <option value="real_estate">Property / Real Estate Equity</option>
+                <optgroup label={t('accounts.groupWealth')}>
+                  <option value="retirement">{tAccType('retirement')}</option>
+                  <option value="brokerage">{tAccType('brokerage')}</option>
+                  <option value="crypto">{tAccType('crypto')}</option>
+                  <option value="real_estate">{tAccType('real_estate')}</option>
                 </optgroup>
-                <optgroup label="Liabilities & Debt">
-                  <option value="credit_card">Credit Card Balance</option>
-                  <option value="loan">Loan / Mortgage / Debt</option>
+                <optgroup label={t('accounts.groupDebt')}>
+                  <option value="credit_card">{tAccType('credit_card')}</option>
+                  <option value="loan">{tAccType('loan')}</option>
                 </optgroup>
-                <optgroup label="Custom">
-                  <option value="custom">Custom Account Type…</option>
+                <optgroup label={t('accounts.groupCustom')}>
+                  <option value="custom">{tAccType('custom')}</option>
                 </optgroup>
               </select>
             </div>
@@ -449,12 +455,12 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
             {newType === 'custom' && (
               <div>
                 <label className="block text-[11px] text-ink-2 mb-1">
-                  Custom Type Label
+                  {t('accounts.customTypeLabel')}
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Precious Metals, Pillar 3a, Co-op Shares"
+                  placeholder={t('onboarding.s3.customTypePlaceholder')}
                   value={newCustomTypeLabel}
                   onChange={(e) => setNewCustomTypeLabel(e.target.value)}
                   className="w-full h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
@@ -464,7 +470,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Net Worth Classification
+                {t('accounts.classificationLabel')}
               </label>
               <select
                 value={newClassification}
@@ -473,22 +479,22 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                 }
                 className="w-full h-9 px-2.5 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
               >
-                <option value="liquid">Liquid Asset (Bank / Cash)</option>
-                <option value="retirement">Retirement / Pension Asset</option>
-                <option value="investment">Investment / Market Asset</option>
-                <option value="fixed_asset">Fixed / Real Estate Asset</option>
-                <option value="liability">Liability / Debt (Subtracted)</option>
+                <option value="liquid">{tAccClassOpt('liquid')}</option>
+                <option value="retirement">{tAccClassOpt('retirement')}</option>
+                <option value="investment">{tAccClassOpt('investment')}</option>
+                <option value="fixed_asset">{tAccClassOpt('fixed_asset')}</option>
+                <option value="liability">{tAccClassOpt('liability')}</option>
               </select>
             </div>
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Account Name
+                {t('accounts.accountNameLabel')}
               </label>
               <input
                 type="text"
                 required
-                placeholder="e.g. UBS Personal Checking, VIAC Pillar 3a"
+                placeholder={t('onboarding.s3.accountNamePlaceholder')}
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 className="w-full h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
@@ -497,11 +503,11 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Bank / Institution (optional)
+                {t('accounts.institutionLabel')}
               </label>
               <input
                 type="text"
-                placeholder="e.g. ZKB, PostFinance, Interactive Brokers"
+                placeholder={t('onboarding.s3.bankPlaceholder')}
                 value={newInstitution}
                 onChange={(e) => setNewInstitution(e.target.value)}
                 className="w-full h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
@@ -510,11 +516,11 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Account / IBAN Ref (optional)
+                {t('accounts.ibanLabel')}
               </label>
               <input
                 type="text"
-                placeholder="e.g. CH93 •••• 4820"
+                placeholder="CH93 •••• 4820"
                 value={newMaskedNumber}
                 onChange={(e) => setNewMaskedNumber(e.target.value)}
                 className="w-full h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
@@ -523,7 +529,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Current / Opening Balance ({currency})
+                {tf('accounts.openingBalanceLabel', { currency })}
               </label>
               <input
                 type="number"
@@ -537,15 +543,15 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Ledger Assignment
+                {t('accounts.ledgerAssignmentLabel')}
               </label>
               <select
                 value={newMode}
                 onChange={(e) => setNewMode(e.target.value as LedgerMode)}
                 className="w-full h-9 px-2.5 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
               >
-                <option value="home">Home / Personal</option>
-                <option value="freelancer">Freelancer / Business</option>
+                <option value="home">{t('accounts.homePersonalOpt')}</option>
+                <option value="freelancer">{t('accounts.freelancerBizOpt')}</option>
               </select>
             </div>
           </div>
@@ -560,7 +566,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                   className="rounded border-line"
                 />
                 <span>
-                  Automatically adjust balance from logged transactions
+                  {t('accounts.autoTrackLabel')}
                 </span>
               </label>
 
@@ -571,7 +577,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                   onChange={(e) => setNewIncludeInNw(e.target.checked)}
                   className="rounded border-line"
                 />
-                <span>Include in Net Worth total</span>
+                <span>{t('accounts.includeNwLabel')}</span>
               </label>
 
               <div className="flex items-center gap-1">
@@ -593,7 +599,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               type="submit"
               className="h-9 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 cursor-pointer"
             >
-              Create Account
+              {t('accounts.createBtn')}
             </button>
           </div>
         </form>
@@ -609,7 +615,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
             <div className="flex items-center gap-2">
               <ArrowLeftRight className="w-4 h-4 text-positive" />
               <h3 className="text-sm font-medium text-ink">
-                Transfer Funds Between Accounts
+                {t('accounts.transferTitle')}
               </h3>
             </div>
             <button
@@ -617,14 +623,14 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               onClick={() => setShowTransferForm(false)}
               className="text-xs text-ink-3 hover:text-ink cursor-pointer"
             >
-              Close
+              {t('common.close')}
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                From Account
+                {t('accounts.fromAccount')}
               </label>
               <select
                 value={fromAccId}
@@ -633,7 +639,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               >
                 {netWorth.accounts.map((a) => (
                   <option key={a.account.id} value={a.account.id}>
-                    {a.account.name} ({formatCurrency(a.liveBalance, currency)})
+                    {tAccountName(a.account)} ({formatCurrency(a.liveBalance, currency)})
                   </option>
                 ))}
               </select>
@@ -641,7 +647,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                To Account
+                {t('accounts.toAccount')}
               </label>
               <select
                 value={toAccId}
@@ -650,7 +656,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               >
                 {netWorth.accounts.map((a) => (
                   <option key={a.account.id} value={a.account.id}>
-                    {a.account.name} ({formatCurrency(a.liveBalance, currency)})
+                    {tAccountName(a.account)} ({formatCurrency(a.liveBalance, currency)})
                   </option>
                 ))}
               </select>
@@ -658,7 +664,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Amount ({currency})
+                {tf('tx.amountCurrency', { currency })}
               </label>
               <input
                 type="number"
@@ -673,11 +679,11 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
 
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Note / Reference
+                {t('accounts.noteRef')}
               </label>
               <input
                 type="text"
-                placeholder="e.g. Monthly Savings / Pillar 3a Transfer"
+                placeholder={t('accounts.noteRef')}
                 value={transferNote}
                 onChange={(e) => setTransferNote(e.target.value)}
                 className="w-full h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink"
@@ -688,7 +694,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               type="submit"
               className="h-9 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 cursor-pointer"
             >
-              Execute Transfer
+              {t('accounts.executeTransferBtn')}
             </button>
           </div>
         </form>
@@ -700,46 +706,46 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           <div className="flex flex-wrap items-center gap-1.5">
             {(
               [
-                { id: 'all', label: `All Accounts (${netWorth.accounts.length})` },
+                { id: 'all', label: tf('accounts.filterAll', { count: netWorth.accounts.length }) },
                 {
                   id: 'liquid',
-                  label: `Liquid / Bank (${
-                    netWorth.accounts.filter(
+                  label: tf('accounts.filterLiquid', {
+                    count: netWorth.accounts.filter(
                       (a) => a.account.classification === 'liquid'
-                    ).length
-                  })`,
+                    ).length,
+                  }),
                 },
                 {
                   id: 'retirement',
-                  label: `Retirement (${
-                    netWorth.accounts.filter(
+                  label: tf('accounts.filterRetirement', {
+                    count: netWorth.accounts.filter(
                       (a) => a.account.classification === 'retirement'
-                    ).length
-                  })`,
+                    ).length,
+                  }),
                 },
                 {
                   id: 'investment',
-                  label: `Investments (${
-                    netWorth.accounts.filter(
+                  label: tf('accounts.filterInvestments', {
+                    count: netWorth.accounts.filter(
                       (a) => a.account.classification === 'investment'
-                    ).length
-                  })`,
+                    ).length,
+                  }),
                 },
                 {
                   id: 'fixed_asset',
-                  label: `Fixed Assets (${
-                    netWorth.accounts.filter(
+                  label: tf('accounts.filterFixed', {
+                    count: netWorth.accounts.filter(
                       (a) => a.account.classification === 'fixed_asset'
-                    ).length
-                  })`,
+                    ).length,
+                  }),
                 },
                 {
                   id: 'liability',
-                  label: `Liabilities (${
-                    netWorth.accounts.filter(
+                  label: tf('accounts.filterLiabilities', {
+                    count: netWorth.accounts.filter(
                       (a) => a.account.classification === 'liability'
-                    ).length
-                  })`,
+                    ).length,
+                  }),
                 },
               ] as { id: FilterBucket; label: string }[]
             ).map((tab) => (
@@ -758,7 +764,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           </div>
 
           <span className="text-[11px] text-ink-3">
-            Click any balance to update or reconcile directly
+            {t('accounts.clickToUpdateHint')}
           </span>
         </div>
 
@@ -766,17 +772,17 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           <div className="p-8 rounded-xl bg-surface border border-line text-center space-y-2">
             <Wallet className="w-6 h-6 text-ink-3 mx-auto" />
             <div className="text-sm font-medium text-ink">
-              No accounts in this category yet
+              {t('accounts.emptyTitle')}
             </div>
             <p className="text-xs text-ink-2 max-w-md mx-auto">
-              Add your bank checking & savings accounts, Pillar 2 / 3a retirement accounts, investment portfolios, or custom accounts to track your complete Net Worth.
+              {t('accounts.emptyDesc')}
             </p>
             <button
               onClick={() => setShowAddForm(true)}
               className="mt-2 h-8 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Add First Account</span>
+              <span>{t('accounts.addFirstBtn')}</span>
             </button>
           </div>
         ) : (
@@ -804,7 +810,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                         </div>
                         <div className="min-w-0">
                           <div className="text-sm font-medium text-ink truncate">
-                            {account.name}
+                            {tAccountName(account)}
                           </div>
                           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-3 mt-0.5">
                             {account.institution && (
@@ -833,7 +839,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                               : 'bg-raised text-ink-3'
                           }`}
                         >
-                          {account.mode === 'freelancer' ? 'Biz' : 'Home'}
+                          {account.mode === 'freelancer' ? t('accounts.badgeBiz') : t('accounts.badgeHome')}
                         </span>
                       </div>
                     </div>
@@ -842,8 +848,8 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                     <div className="pt-1">
                       <div className="text-[10px] uppercase tracking-wider text-ink-3">
                         {isLiability
-                          ? 'Current Debt Balance'
-                          : 'Current Account Balance'}
+                          ? t('accounts.currentDebtBalance')
+                          : t('accounts.currentAccountBalance')}
                       </div>
                       {isEditing ? (
                         <div className="flex items-center gap-1.5 mt-1">
@@ -881,7 +887,6 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                                 ? 'text-ink'
                                 : 'text-accent'
                           }`}
-                          title="Click to update or reconcile balance"
                         >
                           {isLiability && liveBalance > 0 ? '-' : ''}
                           {formatCurrency(Math.abs(liveBalance), currency)}
@@ -906,15 +911,10 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                             ? 'bg-positive/10 border-positive/30 text-positive'
                             : 'bg-app border-line text-ink-3 hover:text-ink-2'
                         }`}
-                        title={
-                          account.autoTrackTransactions
-                            ? 'Balance auto-updates from linked transactions (click to switch to manual valuation)'
-                            : 'Manual valuation mode (click to auto-track from transactions)'
-                        }
                       >
                         <RefreshCw className="w-2.5 h-2.5" />
                         <span>
-                          {account.autoTrackTransactions ? 'Auto-Tx' : 'Manual'}
+                          {account.autoTrackTransactions ? t('accounts.autoTxBadge') : t('accounts.manualBadge')}
                         </span>
                       </button>
 
@@ -925,11 +925,10 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                             onInspectAccountTransactions(account.id)
                           }
                           className="inline-flex items-center gap-1 text-ink-2 hover:text-ink cursor-pointer tabular-nums"
-                          title="View transactions for this account"
                         >
                           <ReceiptText className="w-3 h-3 text-ink-3" />
                           <span>
-                            {txCount} tx ({txNetDelta >= 0 ? '+' : ''}
+                            {tf('worksheet.txCountSuffix', { count: txCount })} ({txNetDelta >= 0 ? '+' : ''}
                             {formatNumber(txNetDelta)})
                           </span>
                         </button>
@@ -939,7 +938,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                     <div className="flex items-center gap-2">
                       <label
                         className="flex items-center gap-1 text-ink-3 hover:text-ink-2 cursor-pointer"
-                        title="Include this account in Net Worth calculation"
+                        title={t('accounts.includeNwLabel')}
                       >
                         <input
                           type="checkbox"
@@ -951,14 +950,14 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                           }
                           className="rounded border-line"
                         />
-                        <span>NW</span>
+                        <span>{t('accounts.nwShort')}</span>
                       </label>
 
                       <button
                         type="button"
                         onClick={() => onDeleteAccount(account.id)}
                         className="p-1 rounded text-ink-3 hover:text-accent hover:bg-raised transition-colors cursor-pointer"
-                        title="Delete Account"
+                        title={t('common.delete')}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -977,10 +976,10 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
         <div className="lg:col-span-5 p-5 rounded-xl bg-surface border border-line space-y-4">
           <div>
             <h2 className="text-sm font-medium text-ink">
-              Asset Allocation & Wealth Structure
+              {t('accounts.allocationTitle')}
             </h2>
             <p className="text-xs text-ink-2 mt-0.5">
-              Distribution across liquid bank reserves, retirement funds, and investments
+              {t('accounts.allocationDesc')}
             </p>
           </div>
 
@@ -994,7 +993,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                       width: `${netWorth.liquidSharePct}%`,
                       backgroundColor: ACCOUNT_CLASS_META.liquid.color,
                     }}
-                    title={`Liquid Assets: ${netWorth.liquidSharePct.toFixed(1)}%`}
+                    title={`${tAccClass('liquid')}: ${netWorth.liquidSharePct.toFixed(1)}%`}
                   />
                 )}
                 {netWorth.retirementSharePct > 0 && (
@@ -1003,7 +1002,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                       width: `${netWorth.retirementSharePct}%`,
                       backgroundColor: ACCOUNT_CLASS_META.retirement.color,
                     }}
-                    title={`Retirement: ${netWorth.retirementSharePct.toFixed(1)}%`}
+                    title={`${tAccClass('retirement')}: ${netWorth.retirementSharePct.toFixed(1)}%`}
                   />
                 )}
                 {netWorth.investmentSharePct > 0 && (
@@ -1012,7 +1011,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                       width: `${netWorth.investmentSharePct}%`,
                       backgroundColor: ACCOUNT_CLASS_META.investment.color,
                     }}
-                    title={`Investments: ${netWorth.investmentSharePct.toFixed(1)}%`}
+                    title={`${tAccClass('investment')}: ${netWorth.investmentSharePct.toFixed(1)}%`}
                   />
                 )}
                 {netWorth.fixedAssetSharePct > 0 && (
@@ -1021,7 +1020,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                       width: `${netWorth.fixedAssetSharePct}%`,
                       backgroundColor: ACCOUNT_CLASS_META.fixed_asset.color,
                     }}
-                    title={`Fixed Assets: ${netWorth.fixedAssetSharePct.toFixed(1)}%`}
+                    title={`${tAccClass('fixed_asset')}: ${netWorth.fixedAssetSharePct.toFixed(1)}%`}
                   />
                 )}
               </>
@@ -1071,7 +1070,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                       className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: meta.color }}
                     />
-                    <span className="text-ink truncate">{meta.label}</span>
+                    <span className="text-ink truncate">{tAccClass(row.cls)}</span>
                   </div>
                   <div className="flex items-center gap-3 tabular-nums shrink-0">
                     <span className="text-ink-3 text-[11px]">
@@ -1099,20 +1098,20 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-medium text-ink">
-                12-Month Net Worth Trajectory
+                {t('accounts.trajectoryTitle')}
               </h2>
               <p className="text-xs text-ink-2 mt-0.5">
-                Combines recorded monthly snapshots with cumulative cashflow progression
+                {t('accounts.trajectoryDesc')}
               </p>
             </div>
             <div className="flex items-center gap-3 text-[11px] text-ink-2">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-positive inline-block" />
-                Net Worth
+                {t('finance.netWorth')}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-indigo inline-block" />
-                Recorded Snapshot
+                {t('accounts.recordedSnapshot')}
               </span>
             </div>
           </div>
@@ -1124,17 +1123,18 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                 Math.round((Math.abs(pt.netWorth) / maxHistoryAbs) * 100)
               );
               const isCurrent = pt.monthKey === monthKey;
+              const mLabel = formatMonth(pt.month, 'short');
               return (
                 <div
                   key={pt.monthKey}
                   className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group"
-                  title={`${pt.monthLabel} (${pt.monthKey})\nNet Worth: ${formatCurrency(
+                  title={`${mLabel} (${pt.monthKey})\n${t('finance.netWorth')}: ${formatCurrency(
                     pt.netWorth,
                     currency
-                  )}\nLiquid: ${formatCurrency(
+                  )}\n${t('accounts.liquidPrefix')} ${formatCurrency(
                     pt.liquidAssets,
                     currency
-                  )}\nRetirement: ${formatCurrency(
+                  )}\n${t('accounts.retirementPrefix')} ${formatCurrency(
                     pt.retirementAssets,
                     currency
                   )}`}
@@ -1158,7 +1158,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                       isCurrent ? 'text-ink font-semibold' : 'text-ink-3'
                     }`}
                   >
-                    {pt.monthLabel}
+                    {mLabel}
                   </span>
                 </div>
               );
@@ -1169,7 +1169,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           {snapshots.length > 0 && (
             <div className="space-y-1.5 pt-1">
               <div className="text-[11px] uppercase tracking-wider text-ink-3 font-medium">
-                Recorded Monthly Balance Sheet Snapshots ({snapshots.length})
+                {tf('accounts.recordedSnapshotsTitle', { count: snapshots.length })}
               </div>
               <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
                 {snapshots
@@ -1185,8 +1185,8 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                           {snap.monthKey}
                         </span>
                         <span className="text-ink-3 text-[11px]">
-                          Liquid: {formatCurrency(snap.liquidAssets, currency)} ·
-                          Retirement: {formatCurrency(snap.retirementAssets, currency)}
+                          {t('accounts.liquidPrefix')} {formatCurrency(snap.liquidAssets, currency)} ·{' '}
+                          {t('accounts.retirementPrefix')} {formatCurrency(snap.retirementAssets, currency)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2.5 tabular-nums">
@@ -1196,7 +1196,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                         <button
                           onClick={() => onDeleteSnapshot(snap.id)}
                           className="text-ink-3 hover:text-accent cursor-pointer"
-                          title="Remove snapshot"
+                          title={t('common.remove')}
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>

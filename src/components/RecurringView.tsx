@@ -14,6 +14,7 @@ import {
   RecurringRule,
 } from '../types';
 import { formatCurrency } from '../utils/calculations';
+import { useI18n } from '../i18n';
 
 interface RecurringViewProps {
   rules: RecurringRule[];
@@ -42,6 +43,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
   onDeleteRule,
   onApplyRecurringToMonth,
 }) => {
+  const { t, tf, tGroupName, tCategoryName } = useI18n();
   const modeFilter = (m: LedgerMode) =>
     workspace === 'combined' ? true : m === workspace;
 
@@ -111,10 +113,10 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl font-normal text-ink tracking-tight">
-            Recurring Income, Subscriptions &amp; Fixed Costs
+            {t('recurring.title')}
           </h1>
           <p className="text-xs text-ink-2 mt-0.5">
-            Automate fixed monthly wages, mortgage/rent, health insurance, SaaS subscriptions, and client retainers.
+            {t('recurring.subtitle')}
           </p>
         </div>
 
@@ -123,7 +125,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           className="h-9 px-4 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer shrink-0"
         >
           <Play className="w-3.5 h-3.5" />
-          <span>Post Active Recurring Items to {monthKey}</span>
+          <span>{tf('recurring.postBtn', { month: monthKey })}</span>
         </button>
       </div>
 
@@ -134,7 +136,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       >
         <div className="flex-[2_1_190px] min-w-[170px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Category
+            {t('finance.category')}
           </label>
           <select
             value={categoryId}
@@ -144,12 +146,12 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             {groups
               .filter((g) => modeFilter(g.mode))
               .map((grp) => (
-                <optgroup key={grp.id} label={grp.name}>
+                <optgroup key={grp.id} label={tGroupName(grp)}>
                   {availCats
                     .filter((c) => c.groupId === grp.id)
                     .map((cat) => (
                       <option key={cat.id} value={cat.id}>
-                        {cat.name}
+                        {tCategoryName(cat)}
                       </option>
                     ))}
                 </optgroup>
@@ -159,11 +161,11 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
 
         <div className="flex-[2_1_190px] min-w-[170px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Description / Subscription Name
+            {t('recurring.descLabel')}
           </label>
           <input
             type="text"
-            placeholder="e.g. Wages, Mortgage/Rent, Health Insurance"
+            placeholder={t('recurring.descPlaceholder')}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className="w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
@@ -172,7 +174,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
 
         <div className="flex-[1_1_115px] min-w-[105px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Amount ({currency})
+            {tf('tx.amountCurrency', { currency })}
           </label>
           <input
             type="number"
@@ -187,7 +189,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
 
         <div className="flex-[1_1_115px] min-w-[105px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Frequency
+            {t('recurring.freqLabel')}
           </label>
           <select
             value={frequency}
@@ -198,15 +200,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             }
             className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
           >
-            <option value="monthly">Monthly</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="yearly">Yearly</option>
+            <option value="monthly">{t('recurring.freqMonthly')}</option>
+            <option value="quarterly">{t('recurring.freqQuarterly')}</option>
+            <option value="yearly">{t('recurring.freqYearly')}</option>
           </select>
         </div>
 
         <div className="w-20 shrink-0">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Day (1–28)
+            {t('recurring.dayRangeLabel')}
           </label>
           <input
             type="number"
@@ -214,7 +216,6 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             max="28"
             value={dayOfMonth}
             onChange={(e) => setDayOfMonth(e.target.value)}
-            title="Day of month"
             className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink text-center tabular-nums focus:outline-none"
           />
         </div>
@@ -224,7 +225,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           className="h-8 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Add Rule</span>
+          <span>{t('recurring.addRuleBtn')}</span>
         </button>
       </form>
 
@@ -234,9 +235,9 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           <div className="flex items-center gap-2">
             <Repeat className="w-4 h-4 text-indigo shrink-0" />
             <span>
-              Fixed Monthly Outflow:{' '}
+              {t('recurring.fixedOutflow')}{' '}
               <strong className="text-ink tabular-nums">
-                {formatCurrency(monthlyRecurringTotalOutflow, currency)}/mo
+                {formatCurrency(monthlyRecurringTotalOutflow, currency)}{t('recurring.perMonthSuffix')}
               </strong>
             </span>
           </div>
@@ -244,16 +245,19 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             <div className="flex items-center gap-1.5 text-ink-2">
               <span>·</span>
               <span>
-                Recurring Income:{' '}
+                {t('recurring.recurringIncome')}{' '}
                 <strong className="text-positive tabular-nums">
-                  +{formatCurrency(monthlyRecurringTotalIncome, currency)}/mo
+                  +{formatCurrency(monthlyRecurringTotalIncome, currency)}{t('recurring.perMonthSuffix')}
                 </strong>
               </span>
             </div>
           )}
         </div>
         <span className="text-ink-3 tabular-nums">
-          {visibleRules.filter((r) => r.active).length} active of {visibleRules.length} recurring items
+          {tf('recurring.activeOfTotal', {
+            active: visibleRules.filter((r) => r.active).length,
+            total: visibleRules.length,
+          })}
         </span>
       </div>
 
@@ -261,12 +265,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       <div className="bg-surface border border-line rounded-xl overflow-hidden divide-y divide-line/60">
         {visibleRules.length === 0 ? (
           <p className="p-8 text-center text-xs text-ink-3">
-            No recurring rules configured yet. Add one above or toggle the recurring icon on categories during setup.
+            {t('recurring.emptyRules')}
           </p>
         ) : (
           visibleRules.map((rule) => {
             const cat = catMap.get(rule.categoryId);
             const grp = cat ? grpMap.get(cat.groupId) : undefined;
+            const ruleTitle = cat
+              ? tCategoryName({ id: cat.id, name: rule.description })
+              : tCategoryName(rule.description);
             return (
               <div
                 key={rule.id}
@@ -278,18 +285,13 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                     className={`cursor-pointer shrink-0 ${
                       rule.active ? 'text-positive' : 'text-ink-3'
                     }`}
-                    title={
-                      rule.active
-                        ? 'Active — click to pause'
-                        : 'Paused — click to activate'
-                    }
                   >
                     <CheckCircle2 className="w-4 h-4" />
                   </button>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-ink font-medium truncate">
-                        {rule.description}
+                        {ruleTitle}
                       </span>
                       <span
                         className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
@@ -298,11 +300,11 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                             : 'bg-raised text-ink-2'
                         }`}
                       >
-                        {rule.type === 'income' ? 'Income' : 'Fixed / Recurring'}
+                        {rule.type === 'income' ? t('finance.income') : t('recurring.fixedBadge')}
                       </span>
                     </div>
                     <div className="text-[11px] text-ink-3 truncate mt-0.5">
-                      {grp?.name ?? 'Category'} · {cat?.name ?? rule.description}
+                      {grp ? tGroupName(grp) : t('finance.category')} · {cat ? tCategoryName(cat) : ruleTitle}
                     </div>
                   </div>
                 </div>
@@ -319,15 +321,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                       })
                     }
                     className="h-7 px-2 rounded bg-raised border border-line text-[11px] text-ink-2 focus:text-ink focus:outline-none"
-                    title="Recurring frequency"
+                    title={t('recurring.freqLabel')}
                   >
-                    <option value="monthly">Monthly</option>
-                    <option value="quarterly">Quarterly</option>
-                    <option value="yearly">Yearly</option>
+                    <option value="monthly">{t('recurring.freqMonthly')}</option>
+                    <option value="quarterly">{t('recurring.freqQuarterly')}</option>
+                    <option value="yearly">{t('recurring.freqYearly')}</option>
                   </select>
 
                   <div className="inline-flex items-center gap-1 text-[11px] text-ink-3">
-                    <span>Day</span>
+                    <span>{t('recurring.dayLabel')}</span>
                     <input
                       type="number"
                       min="1"
@@ -342,7 +344,6 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                         })
                       }
                       className="w-12 h-7 px-1.5 rounded bg-raised border border-line text-[11px] text-ink text-center tabular-nums focus:outline-none"
-                      title="Day of month"
                     />
                   </div>
 
@@ -361,14 +362,13 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                       className={`w-24 h-7 px-2 rounded bg-raised border border-line text-xs tabular-nums text-right font-semibold focus:outline-none ${
                         rule.type === 'income' ? 'text-positive' : 'text-ink'
                       }`}
-                      title="Recurring amount (syncs with monthly budget)"
                     />
                   </div>
 
                   <button
                     onClick={() => onDeleteRule(rule.id)}
                     className="p-1.5 rounded-lg text-ink-3 hover:text-accent hover:bg-raised transition-colors cursor-pointer"
-                    title="Delete recurring rule"
+                    title={t('common.delete')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

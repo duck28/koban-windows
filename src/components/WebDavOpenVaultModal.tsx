@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { testWebDavConnection, webDavErrorMessage } from '../utils/storage';
+import { useI18n } from '../i18n';
 
 export interface WebDavOpenVaultRequest {
   url: string;
@@ -34,6 +35,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
   onClose,
   onDownloadAndOpen,
 }) => {
+  const { t } = useI18n();
   const [form, setForm] = useState<WebDavOpenVaultRequest>({
     url: '',
     username: '',
@@ -57,7 +59,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
     if (!complete) {
       setFeedback({
         type: 'error',
-        text: 'Please enter WebDAV Server URL, Username, and Password / App Token.',
+        text: t('webdav.errEnterCreds'),
       });
       return;
     }
@@ -77,7 +79,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
     if (!complete) {
       setFeedback({
         type: 'error',
-        text: 'Please enter WebDAV Server URL, Username, and Password / App Token.',
+        text: t('webdav.errEnterCreds'),
       });
       return;
     }
@@ -105,10 +107,9 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
           <div className="flex items-start gap-2.5">
             <Cloud className="w-5 h-5 text-indigo shrink-0 mt-0.5" />
             <div>
-              <h2 className="text-sm font-medium text-ink">Open Vault from WebDAV</h2>
+              <h2 className="text-sm font-medium text-ink">{t('webdav.openVaultTitle')}</h2>
               <p className="text-xs text-ink-2 mt-0.5 leading-relaxed">
-                Download an existing Koban vault (from another Windows or Mac device) and use the
-                WebDAV file as this device’s primary storage.
+                {t('webdav.openVaultDesc')}
               </p>
             </div>
           </div>
@@ -117,7 +118,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
             onClick={onClose}
             disabled={isDownloading}
             className="p-1.5 rounded-lg text-ink-3 hover:text-ink hover:bg-raised cursor-pointer disabled:opacity-50"
-            title="Close"
+            title={t('common.close')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -143,7 +144,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
             <div className="md:col-span-8">
-              <label className="block text-[11px] text-ink-2 mb-1">WebDAV Server URL</label>
+              <label className="block text-[11px] text-ink-2 mb-1">{t('webdav.urlLabel')}</label>
               <div className="relative">
                 <Server className="w-3.5 h-3.5 text-ink-3 absolute left-3 top-3" />
                 <input
@@ -157,7 +158,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
               </div>
             </div>
             <div className="md:col-span-4">
-              <label className="block text-[11px] text-ink-2 mb-1">Remote Database Filename</label>
+              <label className="block text-[11px] text-ink-2 mb-1">{t('webdav.filenameLabel')}</label>
               <input
                 type="text"
                 value={form.remoteFileName}
@@ -167,18 +168,18 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
               />
             </div>
             <div className="md:col-span-6">
-              <label className="block text-[11px] text-ink-2 mb-1">WebDAV Username</label>
+              <label className="block text-[11px] text-ink-2 mb-1">{t('webdav.usernameLabel')}</label>
               <input
                 type="text"
                 value={form.username}
                 onChange={(e) => update({ username: e.target.value })}
-                placeholder="user@example.com or username"
+                placeholder={t('webdav.usernamePlaceholder')}
                 className={inputCls}
               />
             </div>
             <div className="md:col-span-6">
               <label className="block text-[11px] text-ink-2 mb-1">
-                WebDAV Password / App Token
+                {t('webdav.passwordLabel')}
               </label>
               <div className="relative">
                 <Lock className="w-3.5 h-3.5 text-ink-3 absolute left-3 top-3" />
@@ -186,14 +187,14 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
                   type={showPassword ? 'text' : 'password'}
                   value={form.password}
                   onChange={(e) => update({ password: e.target.value })}
-                  placeholder="Password or app token"
+                  placeholder={t('webdav.passwordPlaceholder')}
                   className={`${inputCls} pl-8 pr-9`}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-2.5 top-2.5 text-ink-3 hover:text-ink cursor-pointer"
-                  title={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? t('webdav.passwordHideTip') : t('webdav.passwordShowTip')}
                 >
                   {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
@@ -202,8 +203,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
           </div>
 
           <p className="text-[11px] text-ink-3 leading-relaxed">
-            Any existing local database is kept as a <code className="text-ink-2">koban-pre-webdav-sync-…db</code> file
-            next to it. If the vault is protected with a custom passphrase, you will be asked for it after the download.
+            {t('webdav.openVaultNote')}
           </p>
         </div>
 
@@ -219,7 +219,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
             ) : (
               <RefreshCw className="w-3.5 h-3.5" />
             )}
-            <span>Test Connection</span>
+            <span>{t('webdav.testShortBtn')}</span>
           </button>
           <button
             type="button"
@@ -232,7 +232,7 @@ export const WebDavOpenVaultModal: React.FC<WebDavOpenVaultModalProps> = ({
             ) : (
               <CloudDownload className="w-3.5 h-3.5" />
             )}
-            <span>Download & Open</span>
+            <span>{t('webdav.downloadOpenBtn')}</span>
           </button>
         </div>
       </div>

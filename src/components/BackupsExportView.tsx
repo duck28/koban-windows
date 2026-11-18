@@ -23,6 +23,7 @@ import {
   pickSaveFileDialog,
   revealPathInExplorer,
 } from '../utils/storage';
+import { useI18n } from '../i18n';
 
 interface BackupsExportViewProps {
   settings: AppSettings;
@@ -51,6 +52,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
   onOpenImportModal,
   onReloadLedgerState,
 }) => {
+  const { t, tf, intlLocale } = useI18n();
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
@@ -77,7 +79,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
   }, [settings.backupDir, settings.lastBackupAt]);
 
   const handleChooseBackupDir = async () => {
-    const picked = await pickFolderDialog('Select Automatic Backup Folder');
+    const picked = await pickFolderDialog(t('settings.backups.folderPlaceholder'));
     if (picked) {
       onUpdateBackupSettings({
         backupDir: picked,
@@ -123,17 +125,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
 
   const formatTime = (secs: number) => {
     if (!secs) return '—';
-    return new Date(secs * 1000).toLocaleString();
+    return new Date(secs * 1000).toLocaleString(intlLocale);
   };
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-normal text-ink tracking-tight">
-          Encrypted Database, Backups & Data Import / Export
+          {t('backups.title')}
         </h1>
         <p className="text-xs text-ink-2 mt-0.5">
-          All database records and automatic backups are encrypted at rest with authenticated AES-256-GCM.
+          {t('backups.subtitle')}
         </p>
       </div>
 
@@ -145,14 +147,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-medium text-ink">
-                  AES-256-GCM Encrypted SQLite Vault
+                  {t('backups.vaultTitle')}
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-positive/15 text-positive">
-                  {dbInfo?.cipher ?? 'AES-256-GCM'} · {dbInfo?.encrypted_records ?? 0} Encrypted Records
+                  {tf('backups.encryptedRecordsBadge', {
+                    cipher: dbInfo?.cipher ?? 'AES-256-GCM',
+                    count: dbInfo?.encrypted_records ?? 0,
+                  })}
                 </span>
               </div>
               <p className="text-[11px] text-ink-3 mt-0.5">
-                Primary DB: <code className="text-ink-2">{dbInfo?.db_path ?? 'Loading…'}</code> ({formatBytes(dbInfo?.db_size ?? 0)})
+                {t('backups.primaryDbLabel')} <code className="text-ink-2">{dbInfo?.db_path ?? t('backups.loading')}</code> ({formatBytes(dbInfo?.db_size ?? 0)})
               </p>
             </div>
           </div>
@@ -164,7 +169,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                 className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink-2 hover:text-ink cursor-pointer"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                <span>Locate Encrypted DB</span>
+                <span>{t('backups.locateDbBtn')}</span>
               </button>
             )}
             <button
@@ -175,7 +180,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
               className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 cursor-pointer"
             >
               <Database className="w-3.5 h-3.5" />
-              <span>Backup Now</span>
+              <span>{t('backups.backupNowBtn')}</span>
             </button>
           </div>
         </div>
@@ -189,17 +194,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <Lock className="w-4 h-4 text-indigo shrink-0" />
             <div>
               <div className="text-xs font-medium text-ink">
-                Vault Encryption Key Mode:{' '}
+                {t('backups.keyModeLabel')}{' '}
                 <span className="text-positive">
                   {dbInfo?.has_custom_passphrase
-                    ? 'Custom Passphrase Active (salted SHA-256 KDF + AES-256-GCM)'
-                    : 'Built-in Default Key (AES-256-GCM)'}
+                    ? t('backups.keyModeCustom')
+                    : t('backups.keyModeDefault')}
                 </span>
               </div>
               <p className="text-[11px] text-ink-3">
                 {dbInfo?.has_custom_passphrase
-                  ? 'The ledger is stored as authenticated AES-256-GCM ciphertext, keyed by your passphrase.'
-                  : 'The default key is built into the app: anyone with a copy of koban.db or a backup can decrypt it. Set a custom passphrase to protect your data.'}
+                  ? t('backups.keyModeCustomDesc')
+                  : t('backups.keyModeDefaultDesc')}
               </p>
             </div>
           </div>
@@ -207,7 +212,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
           <div className="flex items-center gap-2">
             <input
               type="password"
-              placeholder="Set or change custom passphrase (leave empty for default)…"
+              placeholder={t('backups.passphrasePlaceholder')}
               value={newPassphrase}
               onChange={(e) => setNewPassphrase(e.target.value)}
               className="w-64 h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
@@ -216,7 +221,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
               type="submit"
               className="h-8 px-3 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/70 cursor-pointer"
             >
-              {newPassphrase.trim() ? 'Set Passphrase' : 'Use Default Key'}
+              {newPassphrase.trim() ? t('backups.setPassphraseBtn') : t('backups.useDefaultKeyBtn')}
             </button>
           </div>
         </form>
@@ -225,12 +230,12 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-2 border-t border-line/60 items-end">
           <div className="md:col-span-7">
             <label className="block text-xs text-ink-2 mb-1">
-              User-Chosen Automatic Backup Folder Path
+              {t('backups.folderLabel')}
             </label>
             <div className="flex items-center gap-2">
               <input
                 type="text"
-                placeholder="Choose a folder path for automatic encrypted SQLite (.db) backups…"
+                placeholder={t('backups.folderPlaceholder')}
                 value={settings.backupDir}
                 onChange={(e) =>
                   onUpdateBackupSettings({ backupDir: e.target.value })
@@ -242,13 +247,13 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                 className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/70 shrink-0 cursor-pointer"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                <span>Browse…</span>
+                <span>{t('settings.backups.browse')}</span>
               </button>
               {settings.backupDir && (
                 <button
                   onClick={() => revealPathInExplorer(settings.backupDir)}
                   className="h-9 px-2.5 inline-flex items-center justify-center rounded-lg bg-raised border border-line text-ink-2 hover:text-ink cursor-pointer"
-                  title="Open Backup Folder in Windows Explorer"
+                  title={t('sidebar.revealBackupWin')}
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
@@ -258,7 +263,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
 
           <div className="md:col-span-3">
             <label className="block text-xs text-ink-2 mb-1">
-              Rolling Snapshots to Keep
+              {t('backups.keepSnapshotsLabel')}
             </label>
             <input
               type="number"
@@ -284,7 +289,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                 }
                 className="rounded border-line"
               />
-              <span>Auto-Backup</span>
+              <span>{t('settings.backups.autoBackup')}</span>
             </label>
           </div>
         </div>
@@ -293,7 +298,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
         <div className="space-y-2 pt-3 border-t border-line/60">
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-ink-3 font-semibold">
-              Encrypted Snapshots in Backup Folder ({backups.length})
+              {tf('backups.snapshotsListTitle', { count: backups.length })}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -301,12 +306,11 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                 className="text-xs text-indigo hover:underline inline-flex items-center gap-1 cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
-                <span>Restore from file…</span>
+                <span>{t('backups.restoreFromFile')}</span>
               </button>
               <button
                 onClick={refreshInfo}
                 className="p-1 rounded text-ink-3 hover:text-ink cursor-pointer"
-                title="Refresh backup list"
               >
                 <RefreshCw
                   className={`w-3.5 h-3.5 ${isLoadingBackups ? 'animate-spin' : ''}`}
@@ -318,8 +322,8 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
           {backups.length === 0 ? (
             <p className="text-xs text-ink-3 py-3">
               {settings.backupDir
-                ? 'No backup files in this folder yet. Click "Backup Now" to create your first encrypted snapshot.'
-                : 'Select a backup folder above to enable automatic encrypted SQLite backups.'}
+                ? t('backups.emptyDir')
+                : t('backups.emptyNoDir')}
             </p>
           ) : (
             <div className="max-h-48 overflow-y-auto divide-y divide-line/50 border border-line rounded-lg bg-app">
@@ -339,13 +343,13 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                       onClick={() => revealPathInExplorer(b.path)}
                       className="px-2 py-1 rounded bg-surface border border-line text-[11px] text-ink-2 hover:text-ink cursor-pointer"
                     >
-                      Reveal
+                      {t('backups.revealBtn')}
                     </button>
                     <button
                       onClick={() => onRestoreFromPath(b.path)}
                       className="px-2 py-1 rounded bg-ink text-on-ink text-[11px] hover:opacity-90 cursor-pointer"
                     >
-                      Restore
+                      {t('backups.restoreBtn')}
                     </button>
                   </div>
                 </div>
@@ -358,7 +362,7 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
       {/* 2. Import Data & External Exports */}
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-ink">
-          Import Data & External Excel (.xlsx) / CSV (.csv) Exports
+          {t('backups.exportsSectionTitle')}
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Import Data Card */}
@@ -366,17 +370,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <Upload className="w-4 h-4 text-accent" />
-                <span>Import Data (.xlsx, .csv, .db)</span>
+                <span>{t('backups.importCardTitle')}</span>
               </div>
               <p className="text-xs text-ink-2 mt-1 leading-relaxed">
-                Import a Monthly Budget sheet, bank/transaction CSV or Excel file, or restore an encrypted Koban SQLite database backup.
+                {t('backups.importCardDesc')}
               </p>
             </div>
             <button
               onClick={onOpenImportModal}
               className="h-8 px-3 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 cursor-pointer"
             >
-              Open Import Data Wizard…
+              {t('backups.importCardBtn')}
             </button>
           </div>
 
@@ -384,17 +388,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <FileSpreadsheet className="w-4 h-4 text-positive" />
-                <span>Full Excel Workbook (.xlsx)</span>
+                <span>{t('backups.excelCardTitle')}</span>
               </div>
               <p className="text-xs text-ink-2 mt-1 leading-relaxed">
-                Multi-sheet Excel file containing the 2-column Monthly Budget sheet, Category Breakdown, 12-Month Overview, and Transactions.
+                {t('backups.excelCardDesc')}
               </p>
             </div>
             <button
               onClick={onExportExcel}
               className="h-8 px-3 rounded-lg bg-raised border border-line text-xs text-ink font-medium hover:bg-line/60 cursor-pointer"
             >
-              Export Excel Workbook (.xlsx)…
+              {t('backups.excelCardBtn')}
             </button>
           </div>
 
@@ -402,17 +406,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <FileDown className="w-4 h-4 text-indigo" />
-                <span>Monthly Budget CSV (.csv)</span>
+                <span>{t('backups.budgetCsvCardTitle')}</span>
               </div>
               <p className="text-xs text-ink-2 mt-1 leading-relaxed">
-                Exports the side-by-side 2-column Monthly Budget layout with UTF-8 BOM for direct opening in Microsoft Excel or Google Sheets.
+                {t('backups.budgetCsvCardDesc')}
               </p>
             </div>
             <button
               onClick={onExportBudgetCsv}
               className="h-8 px-3 rounded-lg bg-raised border border-line text-xs text-ink font-medium hover:bg-line/60 cursor-pointer"
             >
-              Export Monthly Budget (.csv)…
+              {t('backups.budgetCsvCardBtn')}
             </button>
           </div>
 
@@ -420,17 +424,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <FileDown className="w-4 h-4 text-accent" />
-                <span>Transactions & Tax CSV (.csv)</span>
+                <span>{t('backups.txCsvCardTitle')}</span>
               </div>
               <p className="text-xs text-ink-2 mt-1 leading-relaxed">
-                Complete transaction log with Freelancer client names, invoice numbers, VAT rates, and tax-deductible expense amounts.
+                {t('backups.txCsvCardDesc')}
               </p>
             </div>
             <button
               onClick={onExportTransactionsCsv}
               className="h-8 px-3 rounded-lg bg-raised border border-line text-xs text-ink font-medium hover:bg-line/60 cursor-pointer"
             >
-              Export Transactions (.csv)…
+              {t('backups.txCsvCardBtn')}
             </button>
           </div>
 
@@ -438,17 +442,17 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-ink">
                 <HardDriveDownload className="w-4 h-4 text-ink-2" />
-                <span>Export Encrypted SQLite Database (.db)</span>
+                <span>{t('backups.sqliteCardTitle')}</span>
               </div>
               <p className="text-xs text-ink-2 mt-1 leading-relaxed">
-                Save a standalone copy of your AES-256-GCM encrypted SQLite database (<code className="text-ink">koban.db</code>) to any external drive or folder.
+                {t('backups.sqliteCardDescPrefix')}<code className="text-ink">koban.db</code>{t('backups.sqliteCardDescSuffix')}
               </p>
             </div>
             <button
               onClick={handleExportStandaloneDb}
               className="h-8 px-4 self-start rounded-lg bg-raised border border-line text-xs text-ink font-medium hover:bg-line/60 cursor-pointer"
             >
-              Export Encrypted SQLite (.db)…
+              {t('backups.sqliteCardBtn')}
             </button>
           </div>
         </div>

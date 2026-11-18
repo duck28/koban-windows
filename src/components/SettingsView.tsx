@@ -76,10 +76,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   updateCheckError = null,
   onCheckForUpdates,
 }) => {
-  const { t } = useI18n();
-  const [newCredentialLabel, setNewCredentialLabel] = useState(
-    'Windows Hello / Passkey'
-  );
+  const { t, tf, intlLocale } = useI18n();
+  const [newCredentialLabel, setNewCredentialLabel] = useState('');
   const [newPassphrase, setNewPassphrase] = useState('');
   const [authStatusMsg, setAuthStatusMsg] = useState<string | null>(null);
   const [isRegisteringPasskey, setIsRegisteringPasskey] = useState(false);
@@ -103,7 +101,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         credentialLabel:
           newCredentialLabel.trim() ||
           (preferMode === 'windows_hello'
-            ? 'Windows Hello (This PC)'
+            ? t('settings.login.credPlaceholder')
             : 'Passkey / Windows Hello'),
         preferMode,
       });
@@ -112,12 +110,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         enabled: true,
         passkeys: [...authConfig.passkeys, cred],
       });
-      setAuthStatusMsg(`Enrolled "${cred.name}" successfully.`);
+      setAuthStatusMsg(tf('settings.login.enrollSuccess', { name: cred.name }));
     } catch (err) {
       setAuthStatusMsg(
         err instanceof Error
           ? err.message
-          : 'Passkey / Windows Hello registration failed.'
+          : t('settings.login.enrollFailed')
       );
     } finally {
       setIsRegisteringPasskey(false);
@@ -130,14 +128,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ...authConfig,
       passkeys: remaining,
     });
-    setAuthStatusMsg('Removed Passkey credential.');
+    setAuthStatusMsg(t('settings.login.removedPasskey'));
   };
 
   const handleSetMasterPassphrase = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newPassphrase.trim();
     if (trimmed.length < 4) {
-      setAuthStatusMsg('Master Passphrase / PIN must be at least 4 characters.');
+      setAuthStatusMsg(t('settings.login.errPassphraseShort'));
       return;
     }
     const { saltB64, hashB64 } = await hashPassphraseVerifier(trimmed);
@@ -149,12 +147,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       passphraseVerifierHashB64: hashB64,
     });
     setNewPassphrase('');
-    setAuthStatusMsg('Updated Master Passphrase / PIN.');
+    setAuthStatusMsg(t('settings.login.updatedPassphraseMsg'));
   };
 
   const handleChooseBackupFolder = async () => {
     const picked = await pickFolderDialog(
-      'Select Automatic Encrypted Database Backup Folder'
+      t('settings.backups.folderPlaceholder')
     );
     if (picked) {
       onUpdateSettings({ backupDir: picked, autoBackup: true });
@@ -178,7 +176,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             onClick={onLockVaultNow}
             className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/70 transition-colors cursor-pointer"
-            title="Lock Koban immediately (Ctrl+L)"
+            title={t('settings.lockNowTip')}
           >
             <Lock className="w-3.5 h-3.5 text-indigo" />
             <span>{t('settings.lockNow')}</span>
@@ -225,7 +223,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {t('settings.login.title')}
               </h2>
               <p className="text-xs text-ink-2">
-                Require authentication when opening Koban using WebAuthn Passkeys, Windows Hello Biometrics/PIN, or a Master Passphrase
+                {t('settings.login.desc')}
               </p>
             </div>
           </div>
@@ -257,7 +255,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {t('settings.login.require')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                Lock the ledger behind Passkey / Windows Hello or Master Passphrase on startup.
+                {t('settings.login.requireDesc')}
               </p>
             </div>
             <input
@@ -276,10 +274,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
             <div>
               <div className="text-xs font-medium text-ink">
-                Auto-prompt Passkey / Windows Hello on launch
+                {t('settings.login.autoPrompt')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                Automatically open the Windows Hello / Passkey prompt as soon as the lock screen appears.
+                {t('settings.login.autoPromptDesc')}
               </p>
             </div>
             <input
@@ -299,7 +297,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="p-3 rounded-lg bg-app border border-line">
             <label className="block text-[11px] font-medium text-ink-2 mb-1">
-              Account Owner Display Name
+              {t('settings.login.ownerName')}
             </label>
             <input
               type="text"
@@ -310,14 +308,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   userDisplayName: e.target.value,
                 })
               }
-              placeholder="e.g. Roland"
+              placeholder={t('settings.login.ownerPlaceholder')}
               className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
             />
           </div>
 
           <div className="p-3 rounded-lg bg-app border border-line">
             <label className="block text-[11px] font-medium text-ink-2 mb-1">
-              Inactivity Auto-Lock Timer
+              {t('settings.login.autoLock')}
             </label>
             <select
               value={authConfig.autoLockMinutes}
@@ -329,11 +327,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               }
               className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
             >
-              <option value={0}>Never auto-lock while open</option>
-              <option value={5}>Lock after 5 minutes idle</option>
-              <option value={15}>Lock after 15 minutes idle</option>
-              <option value={30}>Lock after 30 minutes idle</option>
-              <option value={60}>Lock after 60 minutes idle</option>
+              <option value={0}>{t('settings.login.autoLockNever')}</option>
+              <option value={5}>{t('settings.login.autoLock5')}</option>
+              <option value={15}>{t('settings.login.autoLock15')}</option>
+              <option value={30}>{t('settings.login.autoLock30')}</option>
+              <option value={60}>{t('settings.login.autoLock60')}</option>
             </select>
           </div>
         </div>
@@ -343,10 +341,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-xs font-medium text-ink">
-                Enrolled Passkeys & Windows Hello Credentials ({authConfig.passkeys.length})
+                {tf('settings.login.enrolledTitle', { count: authConfig.passkeys.length })}
               </div>
               <p className="text-[11px] text-ink-2">
-                Register Windows Hello (Face, Fingerprint, PIN) or a FIDO2 hardware security key
+                {t('settings.login.enrolledDesc')}
               </p>
             </div>
           </div>
@@ -364,10 +362,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <div className="font-medium text-ink">{pk.name}</div>
                       <div className="text-[10px] text-ink-3">
                         {pk.kind === 'windows_hello_native'
-                          ? 'Native Windows Hello OS Verifier'
-                          : 'WebAuthn FIDO2 Passkey'}{' '}
-                        • Added{' '}
-                        {new Date(pk.createdAt * 1000).toLocaleDateString()}
+                          ? t('settings.login.nativeVerifier')
+                          : t('settings.login.webauthnVerifier')}{' '}
+                        • {t('settings.login.addedPrefix')}{' '}
+                        {new Date(pk.createdAt * 1000).toLocaleDateString(intlLocale)}
                       </div>
                     </div>
                   </div>
@@ -377,27 +375,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     className="h-7 px-2 rounded-md text-ink-3 hover:text-negative hover:bg-negative/10 inline-flex items-center gap-1 text-[11px] cursor-pointer"
                   >
                     <Trash2 className="w-3 h-3" />
-                    <span>Remove</span>
+                    <span>{t('common.remove')}</span>
                   </button>
                 </div>
               ))}
             </div>
           ) : (
             <div className="text-xs text-ink-3 py-1">
-              No Passkey or Windows Hello credential registered yet.
+              {t('settings.login.noneEnrolled')}
             </div>
           )}
 
           <div className="flex flex-wrap items-end gap-2 pt-1">
             <div className="flex-[1_1_200px] min-w-[160px]">
               <label className="block text-[10px] text-ink-3 mb-1">
-                Credential Label
+                {t('settings.login.credLabel')}
               </label>
               <input
                 type="text"
                 value={newCredentialLabel}
                 onChange={(e) => setNewCredentialLabel(e.target.value)}
-                placeholder="e.g. Windows Hello (Workstation)"
+                placeholder={t('settings.login.credPlaceholder')}
                 className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
               />
             </div>
@@ -409,7 +407,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="h-8 px-3.5 rounded-lg bg-ink text-app text-xs font-medium inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Enroll Passkey / Windows Hello</span>
+              <span>{t('settings.login.enrollBtn')}</span>
             </button>
 
             {windowsHelloNativeAvailable && (
@@ -420,7 +418,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="h-8 px-3 rounded-lg bg-surface border border-line text-xs text-ink hover:bg-raised inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 <Laptop className="w-3.5 h-3.5 text-indigo" />
-                <span>Enroll Native Windows Hello</span>
+                <span>{t('settings.login.enrollNativeBtn')}</span>
               </button>
             )}
           </div>
@@ -434,8 +432,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex-[1_1_240px] min-w-[180px]">
             <label className="block text-[11px] font-medium text-ink-2 mb-1">
               {authConfig.hasMasterPassphrase
-                ? 'Update Master Passphrase / PIN (Configured)'
-                : 'Set Optional Backup Master Passphrase / PIN'}
+                ? t('settings.login.updatePassphraseLabel')
+                : t('settings.login.setPassphraseLabel')}
             </label>
             <div className="relative">
               <KeyRound className="w-3.5 h-3.5 text-ink-3 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -443,7 +441,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="password"
                 value={newPassphrase}
                 onChange={(e) => setNewPassphrase(e.target.value)}
-                placeholder="Enter new Master Passphrase or PIN…"
+                placeholder={t('settings.login.passphrasePlaceholder')}
                 className="w-full h-8 pl-8 pr-3 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
               />
             </div>
@@ -455,8 +453,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             className="h-8 px-3.5 rounded-lg bg-surface border border-line text-xs font-medium text-ink hover:bg-raised transition-colors cursor-pointer disabled:opacity-40"
           >
             {authConfig.hasMasterPassphrase
-              ? 'Update Passphrase'
-              : 'Save Passphrase'}
+              ? t('settings.login.updatePassphraseBtn')
+              : t('settings.login.savePassphraseBtn')}
           </button>
 
           {authConfig.hasMasterPassphrase && (
@@ -469,11 +467,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   passphraseSaltB64: undefined,
                   passphraseVerifierHashB64: undefined,
                 });
-                setAuthStatusMsg('Removed Master Passphrase.');
+                setAuthStatusMsg(t('settings.login.removedPassphraseMsg'));
               }}
               className="h-8 px-3 rounded-lg text-xs text-ink-3 hover:text-negative hover:bg-negative/10 cursor-pointer"
             >
-              Remove Passphrase
+              {t('settings.login.removePassphraseBtn')}
             </button>
           )}
         </form>
@@ -488,7 +486,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {t('settings.copy.title')}
             </h2>
             <p className="text-xs text-ink-2">
-              Control how Koban copies last month&apos;s values into the next month and when confirmation prompts appear
+              {t('settings.copy.desc')}
             </p>
           </div>
         </div>
@@ -498,10 +496,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
             <div>
               <div className="text-xs font-medium text-ink">
-                Ask for confirmation before copying values between months
+                {t('settings.copy.confirmTitle')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                When enabled, Koban always asks if you are sure before copying last month&apos;s values into the next month or across all 12 months.
+                {t('settings.copy.confirmDesc')}
               </p>
             </div>
             <input
@@ -518,10 +516,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
             <div>
               <div className="text-xs font-medium text-ink">
-                Show carry-over prompt when viewing an empty month
+                {t('settings.copy.autoPromptTitle')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                When navigating to a month with 0.00 budgets and actuals, display a quick prompt to copy the previous month&apos;s values.
+                {t('settings.copy.autoPromptDesc')}
               </p>
             </div>
             <input
@@ -540,10 +538,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
             <div>
               <div className="text-xs font-medium text-ink">
-                Overwrite existing non-zero values in target month by default
+                {t('settings.copy.overwriteTitle')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                If disabled, copying a month will only fill categories that are currently 0.00 in the target month.
+                {t('settings.copy.overwriteDesc')}
               </p>
             </div>
             <input
@@ -562,10 +560,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-app border border-line">
             <div>
               <div className="text-xs font-medium text-ink">
-                Default Values to Copy Between Months
+                {t('settings.copy.scopeTitle')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                Choose whether copying last month carries over only Planned Budgets or both Budgets and Direct Actuals.
+                {t('settings.copy.scopeDesc')}
               </p>
             </div>
             <select
@@ -578,10 +576,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="h-8 px-3 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
             >
               <option value="budgets_and_actuals">
-                Copy Both Planned Budgets & Direct Actuals
+                {t('settings.copy.scopeBoth')}
               </option>
               <option value="budgets_only">
-                Copy Planned Budgets Only (Reset Actuals)
+                {t('settings.copy.scopeBudgetsOnly')}
               </option>
             </select>
           </div>
@@ -597,7 +595,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {t('settings.import.title')}
             </h2>
             <p className="text-xs text-ink-2">
-              Control import data preview & confirmation prompts, table visibility, and deletion safety
+              {t('settings.import.desc')}
             </p>
           </div>
         </div>
@@ -608,7 +606,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {t('settings.import.preview')}
             </div>
             <p className="text-[11px] text-ink-2 mt-0.5">
-              When enabled, importing an Excel workbook, CSV budget sheet, transaction statement, or encrypted database backup shows a detailed preview table of parsed categories, amounts, or transactions and asks for your confirmation before modifying the ledger.
+              {t('settings.import.previewDesc')}
             </p>
           </div>
           <input
@@ -627,10 +625,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
             <div>
               <div className="text-xs font-medium text-ink">
-                Ask for confirmation before deleting categories, groups, or accounts
+                {t('settings.import.confirmDeleteTitle')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                Prevents accidental removal of categories or financial accounts that have historical data.
+                {t('settings.import.confirmDeleteDesc')}
               </p>
             </div>
             <input
@@ -646,10 +644,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
             <div>
               <div className="text-xs font-medium text-ink">
-                Hide 0.00 rows by default in Monthly Worksheet
+                {t('settings.import.hideZeroTitle')}
               </div>
               <p className="text-[11px] text-ink-2 mt-0.5">
-                Start the Monthly Budget worksheet with inactive (0 budget & 0 actual) categories collapsed.
+                {t('settings.import.hideZeroDesc')}
               </p>
             </div>
             <input
@@ -673,7 +671,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {t('settings.workspace.title')}
             </h2>
             <p className="text-xs text-ink-2">
-              Regional currency formatting, Freelancer VAT/Tax reserve rates, and Washi/Sumi theme
+              {t('settings.workspace.desc')}
             </p>
           </div>
         </div>
@@ -681,7 +679,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Enabled Profile Mode
+              {t('settings.workspace.profileMode')}
             </label>
             <select
               value={settings.setupMode}
@@ -699,9 +697,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               }}
               className="w-full h-9 px-2.5 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="both">Both (Home + Freelancer)</option>
-              <option value="home">Home Budget Only</option>
-              <option value="freelancer">Freelancer / Business Only</option>
+              <option value="both">{t('settings.workspace.modeBoth')}</option>
+              <option value="home">{t('settings.workspace.modeHome')}</option>
+              <option value="freelancer">{t('settings.workspace.modeFreelancer')}</option>
             </select>
           </div>
 
@@ -714,17 +712,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onChange={(e) => onUpdateSettings({ currency: e.target.value })}
               className="w-full h-9 px-2.5 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="CHF">CHF — Swiss Franc</option>
-              <option value="EUR">EUR (€) — Euro</option>
-              <option value="USD">USD ($) — US Dollar</option>
-              <option value="GBP">GBP (£) — British Pound</option>
-              <option value="JPY">JPY (¥) — Japanese Yen</option>
+              <option value="CHF">{t('settings.currency.chf')}</option>
+              <option value="EUR">{t('settings.currency.eur')}</option>
+              <option value="USD">{t('settings.currency.usd')}</option>
+              <option value="GBP">{t('settings.currency.gbp')}</option>
+              <option value="JPY">{t('settings.currency.jpy')}</option>
             </select>
           </div>
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Default Freelancer VAT %
+              {t('onboarding.s1.vatLabel')}
             </label>
             <div className="relative">
               <Calculator className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
@@ -744,7 +742,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Tax Reserve Set-Aside %
+              {t('onboarding.s1.taxReserveLabel')}
             </label>
             <input
               type="number"
@@ -816,28 +814,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 name: t('settings.palette.default'),
                 desc: t('settings.palette.defaultDesc'),
                 swatches: ['#b9432f', '#3f704d', '#3f6e8c', '#b8862d'],
-                badge: 'Default Zen',
+                badge: t('settings.palette.badgeDefault'),
               },
               {
                 id: 'monochrome' as ThemePalette,
                 name: t('settings.palette.monochrome'),
                 desc: t('settings.palette.monochromeDesc'),
                 swatches: ['#111111', '#383838', '#757575', '#ffffff'],
-                badge: 'Pure B&W',
+                badge: t('settings.palette.badgeMono'),
               },
               {
                 id: 'slate' as ThemePalette,
                 name: t('settings.palette.slate'),
                 desc: t('settings.palette.slateDesc'),
                 swatches: ['#0284c7', '#059669', '#3b82f6', '#d97706'],
-                badge: 'Arctic Nord',
+                badge: t('settings.palette.badgeSlate'),
               },
               {
                 id: 'forest' as ThemePalette,
                 name: t('settings.palette.forest'),
                 desc: t('settings.palette.forestDesc'),
                 swatches: ['#1e5a38', '#2e7d32', '#2c6e64', '#c28100'],
-                badge: 'Botanical',
+                badge: t('settings.palette.badgeForest'),
               },
             ].map((p) => {
               const currentPalette = settings.themePalette || 'default';
@@ -891,7 +889,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {t('settings.density.title')}
               </div>
               <div className="text-[11px] text-ink-2">
-                Comfortable spacious layout or compact data density
+                {t('settings.density.desc')}
               </div>
             </div>
             <div className="flex items-center gap-1 bg-surface p-1 rounded-md border border-line text-xs">
@@ -904,7 +902,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     : 'text-ink-2 hover:text-ink'
                 }`}
               >
-                Cozy
+                {t('settings.density.cozyBtn')}
               </button>
               <button
                 type="button"
@@ -915,7 +913,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     : 'text-ink-2 hover:text-ink'
                 }`}
               >
-                Compact
+                {t('settings.density.compactBtn')}
               </button>
             </div>
           </div>
@@ -948,10 +946,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <ShieldCheck className="w-4 h-4 text-positive" />
             <div>
               <h2 className="text-sm font-medium text-ink">
-                AES-256-GCM Database & Auto-Backup Preferences
+                {t('settings.backups.title')}
               </h2>
               <p className="text-xs text-ink-2">
-                Automatic encrypted snapshots to your chosen directory
+                {t('settings.backups.desc')}
               </p>
             </div>
           </div>
@@ -960,14 +958,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onClick={onOpenBackupsTab}
             className="text-xs text-indigo hover:underline cursor-pointer"
           >
-            Open Full Vault & Backup Manager →
+            {t('settings.backups.openManager')}
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
           <div className="md:col-span-7">
             <label className="block text-[11px] text-ink-2 mb-1">
-              Automatic Backup Folder Path
+              {t('settings.backups.folderLabel')}
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -976,7 +974,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onChange={(e) =>
                   onUpdateSettings({ backupDir: e.target.value })
                 }
-                placeholder="Choose a folder for automatic encrypted backups…"
+                placeholder={t('settings.backups.folderPlaceholder')}
                 className="flex-1 h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink focus:outline-none"
               />
               <button
@@ -985,14 +983,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/60 cursor-pointer shrink-0"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                <span>Browse…</span>
+                <span>{t('settings.backups.browse')}</span>
               </button>
             </div>
           </div>
 
           <div className="md:col-span-3">
             <label className="block text-[11px] text-ink-2 mb-1">
-              Max Rolling Snapshots
+              {t('settings.backups.maxSnapshots')}
             </label>
             <input
               type="number"
@@ -1018,7 +1016,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }
                 className="rounded border-line"
               />
-              <span>Auto-Backup</span>
+              <span>{t('settings.backups.autoBackup')}</span>
             </label>
           </div>
         </div>

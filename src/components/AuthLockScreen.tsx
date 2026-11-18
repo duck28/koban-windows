@@ -48,7 +48,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
   hasCustomDbPassphrase,
   onUnlockSuccess,
 }) => {
-  const { t } = useI18n();
+  const { t, tf } = useI18n();
   const hasCredentialsConfigured =
     authConfig.passkeys.length > 0 ||
     authConfig.hasMasterPassphrase ||
@@ -233,11 +233,11 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
     const p1 = passphraseInput.trim();
     const p2 = confirmPassphraseInput.trim();
     if (p1.length < 4) {
-      setErrorMsg('Master Passphrase / PIN must be at least 4 characters.');
+      setErrorMsg(t('settings.login.errPassphraseShort'));
       return;
     }
     if (p1 !== p2) {
-      setErrorMsg('Passphrases do not match.');
+      setErrorMsg(t('onboarding.s4.errMismatch'));
       return;
     }
 
@@ -304,8 +304,8 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
 
           <p className="text-xs text-ink-2 mt-1 max-w-xs">
             {hasCredentialsConfigured
-              ? `Welcome back, ${authConfig.userDisplayName || 'Koban Owner'}. Verify your identity to decrypt and unlock your ledger.`
-              : `Protect your Home Budget, Freelance Ledger & Net Worth with Windows Hello, a Passkey, or a Master Passphrase.`}
+              ? tf('lock.subWelcome', { name: authConfig.userDisplayName || 'Koban Owner' })
+              : t('lock.subConfigure')}
           </p>
         </div>
 
@@ -388,7 +388,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                         type={showPassphrase ? 'text' : 'password'}
                         value={passphraseInput}
                         onChange={(e) => setPassphraseInput(e.target.value)}
-                        placeholder="Enter passphrase or PIN…"
+                        placeholder={t('lock.passphrasePlaceholder')}
                         autoFocus={authConfig.passkeys.length === 0}
                         className="w-full h-10 pl-9 pr-9 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
                       />
@@ -426,7 +426,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-[11px] font-medium text-ink-2 mb-1.5">
-                  Account Display Name
+                  {t('lock.displayNameLabel')}
                 </label>
                 <div className="relative">
                   <UserCheck className="w-3.5 h-3.5 text-ink-3 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -434,7 +434,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="e.g. Roland"
+                    placeholder={t('settings.login.ownerPlaceholder')}
                     className="w-full h-9 pl-9 pr-3 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
                   />
                 </div>
@@ -446,11 +446,10 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                   <Fingerprint className="w-4 h-4 text-indigo shrink-0 mt-0.5" />
                   <div>
                     <div className="text-xs font-medium text-ink">
-                      Passkey & Windows Hello (Recommended)
+                      {t('lock.passkeyBioTitle')}
                     </div>
                     <p className="text-[11px] text-ink-2 leading-relaxed mt-0.5">
-                      Sign in with your Windows Hello Face, Fingerprint, PIN, or
-                      hardware security key without typing a password.
+                      {t('lock.passkeyBioDesc')}
                     </p>
                   </div>
                 </div>
@@ -476,7 +475,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                       className="w-full h-9 px-3 rounded-xl bg-surface border border-line text-xs text-ink hover:bg-raised inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
                     >
                       <Laptop className="w-3.5 h-3.5 text-indigo" />
-                      <span>Use Native Windows Hello OS Prompt</span>
+                      <span>{t('lock.enrollNativeHello')}</span>
                     </button>
                   )}
                 </div>
@@ -485,7 +484,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
               <div className="relative flex items-center justify-center">
                 <div className="border-t border-line w-full" />
                 <span className="bg-surface px-3 text-[10px] uppercase tracking-wider text-ink-3">
-                  Or set Master Passphrase / PIN
+                  {t('lock.orSetPassphrase')}
                 </span>
                 <div className="border-t border-line w-full" />
               </div>
@@ -499,14 +498,14 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                     type={showPassphrase ? 'text' : 'password'}
                     value={passphraseInput}
                     onChange={(e) => setPassphraseInput(e.target.value)}
-                    placeholder="Passphrase or PIN…"
+                    placeholder={t('lock.shortPassphrasePlaceholder')}
                     className="w-full h-9 px-3 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
                   />
                   <input
                     type={showPassphrase ? 'text' : 'password'}
                     value={confirmPassphraseInput}
                     onChange={(e) => setConfirmPassphraseInput(e.target.value)}
-                    placeholder="Confirm…"
+                    placeholder={t('lock.confirmShortPlaceholder')}
                     className="w-full h-9 px-3 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
                   />
                 </div>
@@ -515,7 +514,7 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                   disabled={isBusy || !passphraseInput.trim()}
                   className="w-full h-9 px-3 rounded-xl bg-raised border border-line text-xs font-medium text-ink hover:bg-line/70 transition-colors cursor-pointer disabled:opacity-40"
                 >
-                  Save Passphrase & Sign In
+                  {t('lock.savePassphraseSignIn')}
                 </button>
               </form>
             </div>
@@ -526,9 +525,9 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
         <div className="px-6 py-3 border-t border-line bg-app/40 flex items-center justify-between text-[11px] text-ink-3">
           <span className="inline-flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-positive" />
-            <span>WebAuthn FIDO2 / Windows Hello Ready</span>
+            <span>{t('lock.bioReadyHello')}</span>
           </span>
-          <span>Local Zero-Knowledge Vault</span>
+          <span>{t('lock.zeroKnowledgeFooter')}</span>
         </div>
       </div>
     </div>

@@ -20,6 +20,7 @@ import {
   TransactionItem,
 } from '../types';
 import { formatCurrency } from '../utils/calculations';
+import { useI18n } from '../i18n';
 
 interface TransactionsViewProps {
   transactions: TransactionItem[];
@@ -58,6 +59,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onOpenImportModal,
   onExportCsv,
 }) => {
+  const { t, tf, tGroupName, tCategoryName, tAccountName } = useI18n();
   const modeFilter = (m: LedgerMode) =>
     workspace === 'combined' ? true : m === workspace;
 
@@ -105,7 +107,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       setCategoryId(preselectedCategoryId);
       const cat = catMap.get(preselectedCategoryId);
       if (cat) {
-        setDescription(cat.name);
+        setDescription(tCategoryName(cat));
         setTaxRate(String(cat.taxRate ?? 0));
         setDeductiblePct(String(cat.deductiblePct ?? 100));
       }
@@ -121,7 +123,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     setCategoryId(newCatId);
     const cat = catMap.get(newCatId);
     if (cat) {
-      if (!description) setDescription(cat.name);
+      if (!description) setDescription(tCategoryName(cat));
       if (cat.taxRate !== undefined) setTaxRate(String(cat.taxRate));
       if (cat.deductiblePct !== undefined)
         setDeductiblePct(String(cat.deductiblePct));
@@ -146,13 +148,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       type: txType,
       categoryId: cat.id,
       accountId: accountId || undefined,
-      description: description.trim() || cat.name,
+      description: description.trim() || tCategoryName(cat),
       amount: numAmt,
       client: client.trim() || undefined,
       invoiceRef: invoiceRef.trim() || undefined,
       taxRate: parseFloat(taxRate) || 0,
       deductiblePct: parseFloat(deductiblePct) || 0,
-      paymentMethod: linkedAcc?.name || 'Main Account',
+      paymentMethod: linkedAcc ? tAccountName(linkedAcc) : t('tx.general'),
       status: 'cleared',
     });
 
@@ -167,27 +169,32 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     workspace !== 'home' || selectedCat?.mode === 'freelancer';
 
   const filteredTxs = transactions
-    .filter((t) => {
-      if (!modeFilter(t.mode)) return false;
-      if (scopeFilter === 'month' && t.monthKey !== monthKey) return false;
-      if (typeFilter !== 'all' && t.type !== typeFilter) return false;
-      if (accountFilter !== 'all' && t.accountId !== accountFilter) return false;
+    .filter((tx) => {
+      if (!modeFilter(tx.mode)) return false;
+      if (scopeFilter === 'month' && tx.monthKey !== monthKey) return false;
+      if (typeFilter !== 'all' && tx.type !== typeFilter) return false;
+      if (accountFilter !== 'all' && tx.accountId !== accountFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const catName = catMap.get(t.categoryId)?.name.toLowerCase() ?? '';
-        const grpName =
-          grpMap.get(catMap.get(t.categoryId)?.groupId ?? '')?.name.toLowerCase() ??
-          '';
-        const accName = t.accountId
-          ? accMap.get(t.accountId)?.name.toLowerCase() ?? ''
-          : '';
+        const catObj = catMap.get(tx.categoryId);
+        const grpObj = catObj ? grpMap.get(catObj.groupId) : undefined;
+        const accObj = tx.accountId ? accMap.get(tx.accountId) : undefined;
+        const catName = catObj?.name.toLowerCase() ?? '';
+        const catLoc = catObj ? tCategoryName(catObj).toLowerCase() : '';
+        const grpName = grpObj?.name.toLowerCase() ?? '';
+        const grpLoc = grpObj ? tGroupName(grpObj).toLowerCase() : '';
+        const accName = accObj?.name.toLowerCase() ?? '';
+        const accLoc = accObj ? tAccountName(accObj).toLowerCase() : '';
         return (
-          t.description.toLowerCase().includes(q) ||
+          tx.description.toLowerCase().includes(q) ||
           catName.includes(q) ||
+          catLoc.includes(q) ||
           grpName.includes(q) ||
+          grpLoc.includes(q) ||
           accName.includes(q) ||
-          (t.client?.toLowerCase().includes(q) ?? false) ||
-          (t.invoiceRef?.toLowerCase().includes(q) ?? false)
+          accLoc.includes(q) ||
+          (tx.client?.toLowerCase().includes(q) ?? false) ||
+          (tx.invoiceRef?.toLowerCase().includes(q) ?? false)
         );
       }
       return true;
@@ -195,11 +202,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const totalShownIncome = filteredTxs
-    .filter((t) => t.type === 'income')
-    .reduce((acc, t) => acc + t.amount, 0);
+    .filter((tx) => tx.type === 'income')
+    .reduce((acc, tx) => acc + tx.amount, 0);
   const totalShownExpense = filteredTxs
-    .filter((t) => t.type === 'expense')
-    .reduce((acc, t) => acc + t.amount, 0);
+    .filter((tx) => tx.type === 'expense')
+    .reduce((acc, tx) => acc + tx.amount, 0);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -207,10 +214,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-normal text-ink tracking-tight">
-            Transactions & Multi-Account Ledger
+            {t('tx.title')}
           </h1>
           <p className="text-xs text-ink-2 mt-0.5">
-            Every entry automatically rolls up into your Monthly Budget Actuals, Account Balances, and Tax Reports.
+            {t('tx.subtitle')}
           </p>
         </div>
 
@@ -224,7 +231,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   : 'text-ink-2 hover:text-ink'
               }`}
             >
-              This Month ({monthKey})
+              {tf('tx.thisMonth', { month: monthKey })}
             </button>
             <button
               onClick={() => setScopeFilter('year')}
@@ -234,7 +241,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   : 'text-ink-2 hover:text-ink'
               }`}
             >
-              All Months
+              {t('tx.allMonths')}
             </button>
           </div>
 
@@ -243,7 +250,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5 text-indigo" />
-            <span>Import CSV / Excel</span>
+            <span>{t('tx.importBtn')}</span>
           </button>
 
           <button
@@ -251,7 +258,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
           >
             <FileDown className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
+            <span>{t('tx.exportBtn')}</span>
           </button>
         </div>
       </div>
@@ -263,7 +270,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       >
         <div className="flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-[0.1em] text-ink-3 font-semibold">
-            Log New Transaction
+            {t('tx.logNew')}
           </span>
           {selectedCat && (
             <span
@@ -273,14 +280,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   : 'bg-accent/15 text-accent'
               }`}
             >
-              {selectedCat.kind === 'income' ? 'Income Entry' : 'Expense / Outflow'}
+              {selectedCat.kind === 'income' ? t('tx.incomeEntry') : t('tx.expenseOutflow')}
             </span>
           )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div>
-            <label className="block text-[11px] text-ink-2 mb-1">Date</label>
+            <label className="block text-[11px] text-ink-2 mb-1">{t('finance.date')}</label>
             <input
               type="date"
               value={date}
@@ -291,7 +298,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
           <div className="sm:col-span-2">
             <label className="block text-[11px] text-ink-2 mb-1">
-              Category
+              {t('finance.category')}
             </label>
             <select
               value={categoryId}
@@ -303,13 +310,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 .map((grp) => (
                   <optgroup
                     key={grp.id}
-                    label={`${grp.name} (${grp.mode.toUpperCase()})`}
+                    label={`${tGroupName(grp)} (${t(`workspace.${grp.mode}`).toUpperCase()})`}
                   >
                     {availableCategories
                       .filter((c) => c.groupId === grp.id)
                       .map((cat) => (
                         <option key={cat.id} value={cat.id}>
-                          {cat.name}
+                          {tCategoryName(cat)}
                         </option>
                       ))}
                   </optgroup>
@@ -319,17 +326,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Account
+              {t('finance.account')}
             </label>
             <select
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               className="w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="">No specific account</option>
+              <option value="">{t('tx.noSpecificAccount')}</option>
               {availableAccounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.name}
+                  {tAccountName(acc)}
                 </option>
               ))}
             </select>
@@ -337,11 +344,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Description / Payee
+              {t('tx.descPayeeLabel')}
             </label>
             <input
               type="text"
-              placeholder="e.g. Groceries, Client Invoice, Rent"
+              placeholder={t('tx.descPlaceholder')}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
@@ -350,7 +357,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Amount ({currency})
+              {tf('tx.amountCurrency', { currency })}
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -367,7 +374,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 className="h-8 px-3.5 inline-flex items-center gap-1 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 shrink-0 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Add</span>
+                <span>{t('common.add')}</span>
               </button>
             </div>
           </div>
@@ -378,11 +385,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-line/60">
             <div>
               <label className="block text-[10px] text-ink-3 mb-1">
-                Client / Project (Freelancer)
+                {t('tx.clientProjectLabel')}
               </label>
               <input
                 type="text"
-                placeholder="Optional client name"
+                placeholder={t('tx.clientPlaceholder')}
                 value={client}
                 onChange={(e) => setClient(e.target.value)}
                 className="w-full h-7 px-2 rounded bg-raised border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
@@ -391,7 +398,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
             <div>
               <label className="block text-[10px] text-ink-3 mb-1">
-                Invoice / Receipt Ref
+                {t('tx.invoiceRefLabel')}
               </label>
               <input
                 type="text"
@@ -404,7 +411,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
             <div>
               <label className="block text-[10px] text-ink-3 mb-1">
-                VAT Rate %
+                {t('tx.vatRateLabel')}
               </label>
               <input
                 type="number"
@@ -417,16 +424,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
             <div>
               <label className="block text-[10px] text-ink-3 mb-1">
-                Tax Deductible %
+                {t('tx.taxDeductibleLabel')}
               </label>
               <select
                 value={deductiblePct}
                 onChange={(e) => setDeductiblePct(e.target.value)}
                 className="w-full h-7 px-2 rounded bg-raised border border-line text-xs text-ink focus:outline-none"
               >
-                <option value="100">100% Deductible</option>
-                <option value="50">50% (Client Meals)</option>
-                <option value="0">0% Non-Deductible</option>
+                <option value="100">{t('tx.ded100')}</option>
+                <option value="50">{t('tx.ded50')}</option>
+                <option value="0">{t('tx.ded0')}</option>
               </select>
             </div>
           </div>
@@ -440,7 +447,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
             <input
               type="text"
-              placeholder="Filter by description, category, account, client…"
+              placeholder={t('tx.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-8 pl-8 pr-7 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
@@ -457,17 +464,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
           <div className="flex items-center gap-1 bg-surface border border-line rounded-lg p-0.5 text-xs">
             <Filter className="w-3.5 h-3.5 text-ink-3 ml-2 mr-1" />
-            {(['all', 'income', 'expense'] as const).map((t) => (
+            {(['all', 'income', 'expense'] as const).map((ft) => (
               <button
-                key={t}
-                onClick={() => setTypeFilter(t)}
-                className={`px-2.5 py-1 rounded-md capitalize cursor-pointer ${
-                  typeFilter === t
+                key={ft}
+                onClick={() => setTypeFilter(ft)}
+                className={`px-2.5 py-1 rounded-md cursor-pointer ${
+                  typeFilter === ft
                     ? 'bg-raised text-ink font-medium'
                     : 'text-ink-2 hover:text-ink'
                 }`}
               >
-                {t}
+                {ft === 'all'
+                  ? t('tx.filterAll')
+                  : ft === 'income'
+                    ? t('tx.filterIncome')
+                    : t('tx.filterExpense')}
               </button>
             ))}
           </div>
@@ -484,10 +495,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 }}
                 className="h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
               >
-                <option value="all">All Accounts</option>
+                <option value="all">{t('tx.allAccounts')}</option>
                 {availableAccounts.map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    Account: {acc.name}
+                    {tf('tx.accountPrefix', { name: tAccountName(acc) })}
                   </option>
                 ))}
               </select>
@@ -497,13 +508,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
         <div className="flex items-center gap-4 text-xs tabular-nums">
           <span className="text-ink-2">
-            Inflow:{' '}
+            {t('tx.inflow')}{' '}
             <strong className="text-positive">
               {formatCurrency(totalShownIncome, currency)}
             </strong>
           </span>
           <span className="text-ink-2">
-            Outflow:{' '}
+            {t('tx.outflow')}{' '}
             <strong className="text-ink">
               {formatCurrency(totalShownExpense, currency)}
             </strong>
@@ -517,17 +528,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-raised/70 border-b border-line text-[11px] text-ink-2 font-semibold uppercase tracking-wider">
-                <th className="py-2.5 px-3">Date</th>
-                <th className="py-2.5 px-3">Category & Group</th>
-                <th className="py-2.5 px-3">Account</th>
-                <th className="py-2.5 px-3">Description</th>
+                <th className="py-2.5 px-3">{t('finance.date')}</th>
+                <th className="py-2.5 px-3">{t('tx.colCategoryGroup')}</th>
+                <th className="py-2.5 px-3">{t('finance.account')}</th>
+                <th className="py-2.5 px-3">{t('finance.description')}</th>
                 {showFreelancerFields && (
                   <>
-                    <th className="py-2.5 px-3">Client / Ref</th>
-                    <th className="py-2.5 px-3 text-right">Tax / Ded.</th>
+                    <th className="py-2.5 px-3">{t('tx.colClientRef')}</th>
+                    <th className="py-2.5 px-3 text-right">{t('tx.colTaxDed')}</th>
                   </>
                 )}
-                <th className="py-2.5 px-3 text-right">Amount</th>
+                <th className="py-2.5 px-3 text-right">{t('finance.amount')}</th>
                 <th className="py-2.5 px-3 w-10"></th>
               </tr>
             </thead>
@@ -538,7 +549,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     colSpan={showFreelancerFields ? 8 : 6}
                     className="py-10 text-center text-ink-3"
                   >
-                    No transactions match your current filter. Add an entry above, import a CSV/Excel file, or edit values directly in the Monthly Budget sheet.
+                    {t('tx.emptyFilter')}
                   </td>
                 </tr>
               ) : (
@@ -565,10 +576,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                           />
                           <div>
                             <div className="text-ink font-medium">
-                              {cat?.name ?? 'Uncategorized'}
+                              {cat ? tCategoryName(cat) : t('tx.uncategorized')}
                             </div>
                             <div className="text-[10px] text-ink-3 uppercase tracking-wider">
-                              {grp?.name ?? tx.mode}
+                              {grp ? tGroupName(grp) : t(`workspace.${tx.mode}`)}
                             </div>
                           </div>
                         </div>
@@ -580,12 +591,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                               className="w-1.5 h-1.5 rounded-full"
                               style={{ backgroundColor: acc.color }}
                             />
-                            <span>{acc.name}</span>
+                            <span>{tAccountName(acc)}</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] text-ink-3">
                             <Landmark className="w-3 h-3" />
-                            <span>{tx.paymentMethod || 'General'}</span>
+                            <span>{tx.paymentMethod || t('tx.general')}</span>
                           </span>
                         )}
                       </td>
@@ -608,10 +619,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                             )}
                           </td>
                           <td className="py-2.5 px-3 text-right tabular-nums text-[11px] text-ink-2">
-                            {tx.taxRate ? `${tx.taxRate}% VAT` : '0% VAT'}
+                            {tx.taxRate ? `${tx.taxRate}% ${t('worksheet.vatShort')}` : `0% ${t('worksheet.vatShort')}`}
                             {tx.type === 'expense' && tx.mode === 'freelancer' && (
                               <span className="block text-indigo">
-                                {tx.deductiblePct ?? 100}% Ded.
+                                {tx.deductiblePct ?? 100}% {t('worksheet.dedShort')}
                               </span>
                             )}
                           </td>
@@ -636,7 +647,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         <button
                           onClick={() => onDeleteTransaction(tx.id)}
                           className="opacity-0 group-hover:opacity-100 p-1 rounded text-ink-3 hover:text-accent transition-opacity cursor-pointer"
-                          title="Delete transaction"
+                          title={t('tx.deleteTip')}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

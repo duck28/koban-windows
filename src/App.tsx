@@ -170,7 +170,7 @@ export function App() {
     createInitialLedgerState('both', 'CHF', '', false)
   );
   const [isLoaded, setIsLoaded] = useState(false);
-  const { t, setLanguage } = useI18n();
+  const { t, tf, setLanguage, tGroupName, tCategoryName } = useI18n();
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
@@ -1014,7 +1014,7 @@ export function App() {
       state.settings.confirmBeforeDelete !== false &&
       grp &&
       !window.confirm(
-        `Are you sure you want to delete the "${grp.name}" group and all categories inside it?`
+        `${tf('worksheet.deleteGrpAlertTitle', { name: tGroupName(grp) })}\n\n${t('worksheet.deleteGrpAlertMsg')}`
       )
     ) {
       return;
@@ -1095,7 +1095,7 @@ export function App() {
       state.settings.confirmBeforeDelete !== false &&
       cat &&
       !window.confirm(
-        `Are you sure you want to delete category "${cat.name}"?`
+        `${tf('worksheet.deleteCatAlertTitle', { name: tCategoryName(cat) })}\n\n${t('worksheet.deleteCatAlertMsg')}`
       )
     ) {
       return;

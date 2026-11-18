@@ -25,21 +25,6 @@ import { Logo } from './Logo';
 import { useI18n } from '../i18n';
 import { LanguageSelect } from './LanguageSelect';
 
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
 function useClickOutside(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -100,11 +85,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onManualBackup,
   isSaving,
 }) => {
-  const { t, intlLocale } = useI18n();
-  const monthName = (idx: number, style: 'long' | 'short' = 'long') =>
-    new Intl.DateTimeFormat(intlLocale, { month: style }).format(
-      new Date(2024, idx, 1)
-    );
+  const { t, tf, formatMonth } = useI18n();
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showMonthMenu, setShowMonthMenu] = useState(false);
   const exportRef = useClickOutside(showExportMenu, () => setShowExportMenu(false));
@@ -134,6 +115,12 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   const ThemeIcon =
     settings.theme === 'light' ? Sun : settings.theme === 'dark' ? Moon : Monitor;
+  const themeLabel =
+    settings.theme === 'light'
+      ? t('settings.themeMode.light')
+      : settings.theme === 'dark'
+        ? t('settings.themeMode.dark')
+        : t('settings.themeMode.system');
 
   return (
     <header className="h-12 bg-surface border-b border-line flex items-center justify-between gap-2 px-2.5 shrink-0 z-30 select-none">
@@ -212,7 +199,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-md text-[13px] font-medium text-ink hover:bg-raised transition-colors tabular-nums cursor-pointer"
           >
             <span>
-              {monthName(settings.activeMonth - 1)} {settings.activeYear}
+              {formatMonth(settings.activeMonth, 'long')} {settings.activeYear}
             </span>
             <ChevronDown className="w-3.5 h-3.5 text-ink-3" />
           </button>
@@ -237,12 +224,12 @@ export const TopBar: React.FC<TopBarProps> = ({
                 </button>
               </div>
               <div className="grid grid-cols-3 gap-1">
-                {MONTH_NAMES.map((mName, idx) => {
+                {Array.from({ length: 12 }, (_, idx) => {
                   const mNum = idx + 1;
                   const active = mNum === settings.activeMonth;
                   return (
                     <button
-                      key={mName}
+                      key={mNum}
                       onClick={() => {
                         onChangeMonth(settings.activeYear, mNum);
                         setShowMonthMenu(false);
@@ -253,7 +240,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                           : 'text-ink-2 hover:bg-raised hover:text-ink'
                       }`}
                     >
-                      {monthName(idx, 'short')}
+                      {formatMonth(mNum, 'short')}
                     </button>
                   );
                 })}
@@ -265,7 +252,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={nextMonth}
           className={iconBtn}
-          title="Next Month"
+          title={t('topbar.nextMonthTip')}
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -276,10 +263,10 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onOpenQuickAddTx}
           className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-raised text-ink text-[12px] hover:bg-line/70 transition-colors cursor-pointer"
-          title="Log Income or Expense Transaction (Ctrl+N)"
+          title={t('topbar.addEntryTip')}
         >
           <Plus className="w-3.5 h-3.5 text-accent" />
-          <span className="hidden sm:inline">Add Entry</span>
+          <span className="hidden sm:inline">{t('topbar.addEntry')}</span>
         </button>
 
         <button
@@ -287,8 +274,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           className={iconBtn}
           title={
             settings.backupDir
-              ? `AES-256-GCM Encrypted Auto-Backup active (${settings.backupDir}) — Click to backup now (Ctrl+S)`
-              : 'Encrypted SQLite DB — Click to backup now (Ctrl+S)'
+              ? tf('topbar.backupTipActive', { dir: settings.backupDir })
+              : t('topbar.backupTipDefault')
           }
         >
           <CheckCircle2
@@ -305,7 +292,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={cycleTheme}
           className={iconBtn}
-          title={`Theme: ${settings.theme} (Click to switch)`}
+          title={tf('topbar.themeTip', { theme: themeLabel })}
         >
           <ThemeIcon className="w-4 h-4" />
         </button>
@@ -315,7 +302,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onOpenSettings}
           className={iconBtn}
-          title="Settings & Behavioral Options"
+          title={t('topbar.settingsTip')}
         >
           <SlidersHorizontal className="w-4 h-4" />
         </button>
@@ -323,7 +310,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onOpenSetupWizard}
           className={iconBtn}
-          title="4-Step Setup Wizard"
+          title={t('topbar.wizardTip')}
         >
           <Sparkles className="w-4 h-4" />
         </button>
@@ -340,7 +327,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           onClick={onOpenImportModal}
           className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-line bg-surface text-ink text-[12px] hover:bg-raised transition-colors cursor-pointer"
-          title="Import Data (Excel, CSV, Transactions, or Encrypted DB Backup)"
+          title={t('topbar.importTip')}
         >
           <Upload className="w-3.5 h-3.5 text-indigo" />
           <span className="hidden sm:inline">{t('topbar.import')}</span>
@@ -350,7 +337,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={() => setShowExportMenu((v) => !v)}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-md bg-ink text-on-ink text-[12px] hover:opacity-85 transition-opacity cursor-pointer"
-            title="Export (CSV / Excel / Encrypted Backup)"
+            title={t('topbar.exportTip')}
           >
             <span>{t('topbar.export')}</span>
             <ChevronDown className="w-3.5 h-3.5 opacity-70" />
@@ -359,7 +346,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           {showExportMenu && (
             <div className="absolute right-0 top-full mt-2 w-72 py-1.5 bg-surface border border-line rounded-xl shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] z-50">
               <div className="px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-ink-3">
-                Excel & CSV Exports
+                {t('topbar.exportMenuHeader')}
               </div>
               <button
                 onClick={() => {
@@ -371,10 +358,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <FileSpreadsheet className="w-4 h-4 mt-0.5 text-positive shrink-0" />
                 <div>
                   <span className="block text-ink font-medium">
-                    Export Excel Workbook (.xlsx)…
+                    {t('topbar.exportExcelTitle')}
                   </span>
                   <span className="block text-[11px] text-ink-3 mt-0.5">
-                    Monthly Worksheet, Breakdown, 12-Month & Transactions
+                    {t('topbar.exportExcelDesc')}
                   </span>
                 </div>
               </button>
@@ -389,10 +376,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <FileDown className="w-4 h-4 mt-0.5 text-indigo shrink-0" />
                 <div>
                   <span className="block text-ink">
-                    Export Monthly Budget CSV (.csv)…
+                    {t('topbar.exportBudgetCsvTitle')}
                   </span>
                   <span className="block text-[11px] text-ink-3 mt-0.5">
-                    2-column monthly budget sheet for Excel
+                    {t('topbar.exportBudgetCsvDesc')}
                   </span>
                 </div>
               </button>
@@ -407,10 +394,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <FileDown className="w-4 h-4 mt-0.5 text-ink-2 shrink-0" />
                 <div>
                   <span className="block text-ink">
-                    Export Transactions & Tax CSV (.csv)…
+                    {t('topbar.exportTxCsvTitle')}
                   </span>
                   <span className="block text-[11px] text-ink-3 mt-0.5">
-                    All entries with VAT, deductible % & invoice refs
+                    {t('topbar.exportTxCsvDesc')}
                   </span>
                 </div>
               </button>
@@ -427,10 +414,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <Upload className="w-4 h-4 mt-0.5 text-accent shrink-0" />
                 <div>
                   <span className="block text-ink">
-                    Import Data (.xlsx, .csv, .db)…
+                    {t('topbar.importItemTitle')}
                   </span>
                   <span className="block text-[11px] text-ink-3 mt-0.5">
-                    Import budget sheets, transactions, or backups
+                    {t('topbar.importItemDesc')}
                   </span>
                 </div>
               </button>
@@ -445,10 +432,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <Database className="w-4 h-4 mt-0.5 text-ink-2 shrink-0" />
                 <div>
                   <span className="block text-ink">
-                    Backup Encrypted DB Now (Ctrl+S)
+                    {t('topbar.backupNowTitle')}
                   </span>
                   <span className="block text-[11px] text-ink-3 mt-0.5">
-                    Save AES-256-GCM encrypted SQLite snapshot
+                    {t('topbar.backupNowDesc')}
                   </span>
                 </div>
               </button>

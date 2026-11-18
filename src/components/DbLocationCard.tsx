@@ -16,6 +16,7 @@ import {
   resetDatabaseLocation,
   revealPathInExplorer,
 } from '../utils/storage';
+import { useI18n } from '../i18n';
 
 interface DbLocationCardProps {
   onDatabaseMoved?: (newDbInfo: DbInfo) => void;
@@ -26,6 +27,7 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
   onDatabaseMoved,
   className = '',
 }) => {
+  const { t, tf } = useI18n();
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -54,12 +56,12 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
     setStatusMsg(null);
     setErrorMsg(null);
     try {
-      const picked = await pickFolderDialog('Select New Database Folder Location');
+      const picked = await pickFolderDialog(t('dbLoc.moveBtn'));
       if (picked) {
         setPendingMoveFolder(picked);
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to select folder.');
+      setErrorMsg(err instanceof Error ? err.message : t('dbLoc.errSelectFolder'));
     }
   };
 
@@ -72,10 +74,10 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
       const updated = await moveDatabaseLocation(pendingMoveFolder);
       setDbInfo(updated);
       setPendingMoveFolder(null);
-      setStatusMsg(`Database successfully relocated to: ${updated.db_path}`);
+      setStatusMsg(tf('dbLoc.relocatedSuccess', { path: updated.db_path }));
       onDatabaseMoved?.(updated);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to move database.');
+      setErrorMsg(err instanceof Error ? err.message : t('dbLoc.errMove'));
     } finally {
       setIsProcessing(false);
     }
@@ -89,10 +91,10 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
       const updated = await resetDatabaseLocation();
       setDbInfo(updated);
       setShowConfirmReset(false);
-      setStatusMsg('Database location reset to default (%LOCALAPPDATA%\\Koban).');
+      setStatusMsg(t('dbLoc.resetSuccessWin'));
       onDatabaseMoved?.(updated);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to reset location.');
+      setErrorMsg(err instanceof Error ? err.message : t('dbLoc.errReset'));
     } finally {
       setIsProcessing(false);
     }
@@ -112,23 +114,23 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-ink">
-                Database Storage Location
+                {t('dbLoc.title')}
               </h2>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo/15 text-indigo border border-indigo/20">
-                Expert Setting
+                {t('dbLoc.expertBadge')}
               </span>
               {dbInfo?.is_custom_location ? (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/15 text-amber-500 border border-amber-500/20">
-                  Custom Location
+                  {t('dbLoc.customBadge')}
                 </span>
               ) : (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-raised text-ink-2 border border-line">
-                  Default AppData Location
+                  {t('dbLoc.defaultBadgeWin')}
                 </span>
               )}
             </div>
             <p className="text-xs text-ink-2 mt-0.5">
-              Change where the encrypted SQLite database (<code className="text-ink">koban.db</code>) is stored (e.g. secondary drive, encrypted partition, or local sync folder).
+              {t('dbLoc.descPrefix')}<code className="text-ink">koban.db</code>{t('dbLoc.descSuffix')}
             </p>
           </div>
         </div>
@@ -138,10 +140,10 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
             type="button"
             onClick={() => revealPathInExplorer(dbInfo.db_path)}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink-2 hover:text-ink cursor-pointer transition-colors"
-            title="Open folder in Windows File Explorer"
+            title={t('dbLoc.showInExplorerTip')}
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            <span>Show in Explorer</span>
+            <span>{t('dbLoc.showInExplorer')}</span>
           </button>
         )}
       </div>
@@ -164,13 +166,13 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
       <div className="space-y-3">
         <div>
           <label className="block text-[11px] text-ink-2 mb-1">
-            Active Encrypted SQLite File Path
+            {t('dbLoc.activePathLabel')}
           </label>
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
               readOnly
-              value={dbInfo?.db_path ?? (isLoading ? 'Detecting active database path…' : '—')}
+              value={dbInfo?.db_path ?? (isLoading ? t('dbLoc.detectingPath') : '—')}
               className="flex-1 min-w-[280px] h-9 px-3 rounded-lg bg-app border border-line text-xs text-ink font-mono select-all focus:outline-none"
             />
             <button
@@ -180,7 +182,7 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
               className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 disabled:opacity-50 cursor-pointer shrink-0 transition-opacity"
             >
               <FolderOpen className="w-3.5 h-3.5" />
-              <span>Move to Another Folder…</span>
+              <span>{t('dbLoc.moveBtn')}</span>
             </button>
 
             {dbInfo?.is_custom_location && (
@@ -189,10 +191,10 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
                 disabled={isProcessing}
                 onClick={() => setShowConfirmReset(true)}
                 className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink-2 hover:text-ink hover:bg-line/60 disabled:opacity-50 cursor-pointer shrink-0 transition-colors"
-                title="Move database back to %LOCALAPPDATA%\Koban"
+                title={t('dbLoc.resetWinTip')}
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset to Default</span>
+                <span>{t('dbLoc.resetBtn')}</span>
               </button>
             )}
           </div>
@@ -200,12 +202,12 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
 
         <div className="flex flex-wrap items-center justify-between text-[11px] text-ink-3 gap-2 pt-1">
           <div className="flex items-center gap-3">
-            <span>Size: <strong className="text-ink-2 font-mono">{formatBytes(dbInfo?.db_size ?? 0)}</strong></span>
-            <span>Cipher: <strong className="text-ink-2">{dbInfo?.cipher ?? 'AES-256-GCM'}</strong></span>
-            <span>Records: <strong className="text-ink-2 font-mono">{dbInfo?.encrypted_records ?? 0}</strong></span>
+            <span>{t('dbLoc.sizeLabel')} <strong className="text-ink-2 font-mono">{formatBytes(dbInfo?.db_size ?? 0)}</strong></span>
+            <span>{t('dbLoc.cipherLabel')} <strong className="text-ink-2">{dbInfo?.cipher ?? 'AES-256-GCM'}</strong></span>
+            <span>{t('dbLoc.recordsLabel')} <strong className="text-ink-2 font-mono">{dbInfo?.encrypted_records ?? 0}</strong></span>
           </div>
           <span className="text-ink-3">
-            Koban automatically points to the relocated path on every launch.
+            {t('dbLoc.footnote')}
           </span>
         </div>
       </div>
@@ -217,16 +219,16 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <div className="text-xs font-medium text-ink">
-                Confirm Relocation to New Folder?
+                {t('dbLoc.confirmMoveTitle')}
               </div>
               <p className="text-xs text-ink-2 leading-relaxed">
-                Your encrypted database (<code className="text-ink font-mono">koban.db</code>) will be safely copied to:
+                {t('dbLoc.confirmMoveBodyPrefix')}<code className="text-ink font-mono">koban.db</code>{t('dbLoc.confirmMoveBodySuffix')}
               </p>
               <div className="p-2 rounded bg-surface border border-line text-xs font-mono text-ink break-all select-all">
                 {pendingMoveFolder}\koban.db
               </div>
               <p className="text-[11px] text-ink-3">
-                All records, encryption keys, and SQLite state will transfer safely. Koban will immediately switch to using the new file.
+                {t('dbLoc.confirmMoveNote')}
               </p>
             </div>
           </div>
@@ -238,7 +240,7 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
               onClick={() => setPendingMoveFolder(null)}
               className="h-8 px-3 rounded-lg border border-line bg-surface text-xs text-ink hover:bg-raised cursor-pointer disabled:opacity-50"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -247,7 +249,7 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
               className="h-8 px-4 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
             >
               {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>Confirm & Transfer Database</span>
+              <span>{t('dbLoc.confirmMoveBtn')}</span>
             </button>
           </div>
         </div>
@@ -260,10 +262,10 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
             <RotateCcw className="w-4 h-4 text-indigo shrink-0 mt-0.5" />
             <div className="space-y-1">
               <div className="text-xs font-medium text-ink">
-                Reset to Default Location?
+                {t('dbLoc.confirmResetTitle')}
               </div>
               <p className="text-xs text-ink-2 leading-relaxed">
-                The database will be copied back to the default Windows AppData folder (<code className="text-ink font-mono">%LOCALAPPDATA%\Koban\koban.db</code>) and the custom location pointer will be cleared.
+                {t('dbLoc.confirmResetWinPrefix')}<code className="text-ink font-mono">%LOCALAPPDATA%\Koban\koban.db</code>{t('dbLoc.confirmResetSuffix')}
               </p>
             </div>
           </div>
@@ -275,7 +277,7 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
               onClick={() => setShowConfirmReset(false)}
               className="h-8 px-3 rounded-lg border border-line bg-surface text-xs text-ink hover:bg-raised cursor-pointer disabled:opacity-50"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -284,7 +286,7 @@ export const DbLocationCard: React.FC<DbLocationCardProps> = ({
               className="h-8 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
             >
               {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              <span>Reset to Default</span>
+              <span>{t('dbLoc.resetBtn')}</span>
             </button>
           </div>
         </div>

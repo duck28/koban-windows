@@ -3,6 +3,7 @@ import { Plus, Trash2, Target } from 'lucide-react';
 import { ActiveWorkspace, LedgerMode, SavingsGoal } from '../types';
 import { formatCurrency } from '../utils/calculations';
 import { ZEN_PALETTE } from '../data/templates';
+import { useI18n } from '../i18n';
 
 interface SavingsGoalsViewProps {
   goals: SavingsGoal[];
@@ -21,6 +22,7 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
   onUpdateGoalAmount,
   onDeleteGoal,
 }) => {
+  const { t, tf, tGoalName } = useI18n();
   const [name, setName] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
   const [currentAmount, setCurrentAmount] = useState('');
@@ -61,10 +63,10 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-normal text-ink tracking-tight">
-          Savings Goals, Sinking Funds &amp; Tax Reserves
+          {t('goals.title')}
         </h1>
         <p className="text-xs text-ink-2 mt-0.5">
-          Track progress toward emergency funds, equipment replacements, and freelancer tax set-asides.
+          {t('goals.subtitle')}
         </p>
       </div>
 
@@ -75,11 +77,11 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
       >
         <div className="flex-[2_1_200px] min-w-[180px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Goal / Reserve Name
+            {t('goals.nameLabel')}
           </label>
           <input
             type="text"
-            placeholder="e.g. Emergency Fund, Tax Provision"
+            placeholder={t('goals.namePlaceholder')}
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
@@ -89,7 +91,7 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
 
         <div className="flex-[1_1_110px] min-w-[100px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Target ({currency})
+            {tf('goals.targetLabel', { currency })}
           </label>
           <input
             type="number"
@@ -104,7 +106,7 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
 
         <div className="flex-[1_1_110px] min-w-[100px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Saved So Far
+            {t('goals.savedSoFarLabel')}
           </label>
           <input
             type="number"
@@ -118,7 +120,7 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
 
         <div className="flex-[1_1_110px] min-w-[100px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Monthly Plan
+            {t('goals.monthlyPlanLabel')}
           </label>
           <input
             type="number"
@@ -133,22 +135,22 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
         {workspace === 'combined' && (
           <div className="flex-[1_1_115px] min-w-[105px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
-              Workspace
+              {t('sidebar.workspace')}
             </label>
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value as LedgerMode)}
               className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="home">Home</option>
-              <option value="freelancer">Freelancer</option>
+              <option value="home">{t('workspace.home')}</option>
+              <option value="freelancer">{t('workspace.freelancer')}</option>
             </select>
           </div>
         )}
 
         <div className="flex-[1_1_140px] min-w-[135px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            Target Date
+            {t('goals.targetDateLabel')}
           </label>
           <input
             type="date"
@@ -163,7 +165,7 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
           className="h-8 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Add Goal</span>
+          <span>{t('goals.addGoalBtn')}</span>
         </button>
       </form>
 
@@ -195,17 +197,17 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-sm font-medium text-ink truncate">
-                      {goal.name}
+                      {tGoalName(goal)}
                     </h3>
                     <span className="block text-[11px] text-ink-3 uppercase tracking-wider truncate">
-                      {goal.mode} · Target Date: {goal.targetDate || 'Flexible'}
+                      {t(`workspace.${goal.mode}`)} · {t('goals.targetDateLabel')}: {goal.targetDate || t('goals.flexibleDate')}
                     </span>
                   </div>
                 </div>
                 <button
                   onClick={() => onDeleteGoal(goal.id)}
                   className="p-1.5 rounded-lg text-ink-3 hover:text-accent hover:bg-raised transition-colors cursor-pointer shrink-0"
-                  title="Delete goal"
+                  title={t('common.delete')}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -217,7 +219,10 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
                     {formatCurrency(goal.currentAmount, currency)}
                   </span>
                   <span className="text-ink-2 tabular-nums">
-                    of {formatCurrency(goal.targetAmount, currency)} ({pct.toFixed(1)}%)
+                    {tf('goals.ofTarget', {
+                      target: formatCurrency(goal.targetAmount, currency),
+                      pct: pct.toFixed(1),
+                    })}
                   </span>
                 </div>
 
@@ -235,10 +240,13 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-line/60 text-xs">
                 <span className="text-ink-3 min-w-0">
                   {remaining === 0
-                    ? 'Goal reached!'
+                    ? t('goals.goalReached')
                     : monthsToGoal
-                      ? `~${monthsToGoal} mo left at ${formatCurrency(goal.monthlyContribution, currency)}/mo`
-                      : `${formatCurrency(remaining, currency)} remaining`}
+                      ? tf('goals.monthsLeftAt', {
+                          months: monthsToGoal,
+                          amount: formatCurrency(goal.monthlyContribution, currency),
+                        })
+                      : tf('goals.remaining', { amount: formatCurrency(remaining, currency) })}
                 </span>
 
                 <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -252,12 +260,11 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
                         )
                       }
                       className="h-7 px-2 rounded bg-raised border border-line text-[11px] text-ink-2 hover:text-ink hover:bg-line/50 transition-colors cursor-pointer tabular-nums"
-                      title="Add one monthly contribution to current balance"
                     >
                       +{goal.monthlyContribution}
                     </button>
                   )}
-                  <span className="text-[11px] text-ink-3">Balance:</span>
+                  <span className="text-[11px] text-ink-3">{t('goals.balanceLabel')}</span>
                   <input
                     type="number"
                     step="50"

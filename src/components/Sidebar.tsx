@@ -53,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSetupWizard,
 }) => {
   const [panelMode, setPanelMode] = useState<SidePanelMode>('nav');
-  const { t } = useI18n();
+  const { t, tGroupName } = useI18n();
 
   if (!isOpen) return null;
 
@@ -164,10 +164,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-0.5">
             <div className="px-2.5 pb-1.5 text-[10px] uppercase tracking-[0.12em] text-ink-3">
               {settings.activeWorkspace === 'home'
-                ? 'Home Budget Ledger'
+                ? t('sidebar.homeLedger')
                 : settings.activeWorkspace === 'freelancer'
-                  ? 'Freelancer Business'
-                  : 'Combined Ledger'}
+                  ? t('sidebar.freelancerLedger')
+                  : t('sidebar.combinedLedger')}
             </div>
 
             {navItems.map((item) => {
@@ -204,7 +204,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="p-3 rounded-lg bg-app border border-line space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase tracking-[0.12em] text-ink-3">
-                  Monthly Summary
+                  {t('sidebar.monthlySummary')}
                 </span>
                 <span className="text-[11px] tabular-nums text-ink-2">
                   {summary.monthKey}
@@ -213,20 +213,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <div className="space-y-1 text-[12px]">
                 <div className="flex justify-between">
-                  <span className="text-ink-2">Total Income</span>
+                  <span className="text-ink-2">{t('sidebar.totalIncome')}</span>
                   <span className="tabular-nums text-positive font-medium">
                     {formatCurrency(summary.incomeActual, settings.currency)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-ink-2">Total Expenses</span>
+                  <span className="text-ink-2">{t('sidebar.totalExpenses')}</span>
                   <span className="tabular-nums text-ink">
                     {formatCurrency(summary.totalOutflowActual, settings.currency)}
                   </span>
                 </div>
                 <div className="h-px bg-line my-1" />
                 <div className="flex justify-between font-medium">
-                  <span className="text-ink">NET</span>
+                  <span className="text-ink">{t('finance.net')}</span>
                   <span
                     className={`tabular-nums ${
                       summary.netActual >= 0 ? 'text-positive' : 'text-accent'
@@ -239,7 +239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {settings.activeWorkspace !== 'home' && (
                 <div className="pt-1.5 border-t border-line/70 flex justify-between text-[11px]">
-                  <span className="text-ink-3">Deductible Exp.</span>
+                  <span className="text-ink-3">{t('sidebar.deductibleExp')}</span>
                   <span className="tabular-nums text-indigo">
                     {formatCurrency(
                       summary.deductibleExpensesActual,
@@ -252,10 +252,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div
                 onClick={() => onSelectTab('accounts')}
                 className="pt-1.5 border-t border-line/70 space-y-0.5 cursor-pointer hover:opacity-90"
-                title="Open Accounts & Net Worth Tracker"
+                title={t('sidebar.netWorthTip')}
               >
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-ink-2 font-medium">Net Worth</span>
+                  <span className="text-ink-2 font-medium">{t('finance.netWorth')}</span>
                   <span
                     className={`tabular-nums font-medium ${
                       netWorth.netWorth >= 0 ? 'text-positive' : 'text-accent'
@@ -265,7 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between text-[10px] text-ink-3">
-                  <span>Liquid / Retirement</span>
+                  <span>{t('sidebar.liquidRetirement')}</span>
                   <span className="tabular-nums">
                     {formatCurrency(netWorth.liquidAssets, settings.currency)} /{' '}
                     {formatCurrency(netWorth.retirementAssets, settings.currency)}
@@ -285,15 +285,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                   <span className="font-medium text-ink truncate">
                     {settings.backupDir && settings.autoBackup
-                      ? 'Auto-Backup Active'
-                      : 'Local SQLite Saved'}
+                      ? t('sidebar.autoBackupActive')
+                      : t('sidebar.localSqliteSaved')}
                   </span>
                 </div>
                 {settings.backupDir && (
                   <button
                     onClick={onRevealBackupDir}
                     className="text-ink-3 hover:text-ink cursor-pointer"
-                    title="Reveal Backup Folder in Explorer"
+                    title={t('sidebar.revealBackupWin')}
                   >
                     <ExternalLink className="w-3 h-3" />
                   </button>
@@ -304,12 +304,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className="text-ink-3 truncate cursor-pointer hover:text-ink-2"
                 title={
                   settings.backupDir ||
-                  'Click to choose an automatic backup folder'
+                  t('sidebar.chooseBackupPathTip')
                 }
               >
                 {settings.backupDir
                   ? settings.backupDir
-                  : 'Choose auto-backup path →'}
+                  : t('sidebar.chooseBackupPath')}
               </p>
             </div>
 
@@ -318,7 +318,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="w-full h-7 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-md text-[11px] text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
             >
               <Sparkles className="w-3 h-3 text-accent" />
-              <span>Re-run Setup / Change Mode</span>
+              <span>{t('sidebar.rerunSetup')}</span>
             </button>
           </div>
         </div>
@@ -343,7 +343,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       style={{ backgroundColor: gs.group.color }}
                     />
                     <span className="text-[12px] text-ink truncate font-medium">
-                      {gs.group.name}
+                      {tGroupName(gs.group)}
                     </span>
                   </div>
                   <span className="text-[11px] tabular-nums text-ink-2">
@@ -351,7 +351,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-ink-3 tabular-nums">
-                  <span>Budget: {formatCurrency(gs.totalBudget, settings.currency)}</span>
+                  <span>{t('finance.budget')}: {formatCurrency(gs.totalBudget, settings.currency)}</span>
                   <span
                     className={
                       gs.totalDifference >= 0 ? 'text-positive' : 'text-accent'

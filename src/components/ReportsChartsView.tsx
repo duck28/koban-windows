@@ -16,6 +16,7 @@ import {
   formatNumber,
   MonthSummaryMetrics,
 } from '../utils/calculations';
+import { useI18n } from '../i18n';
 
 interface ReportsChartsViewProps {
   state: LedgerState;
@@ -32,6 +33,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
   workspace,
   currency,
 }) => {
+  const { t, tf, tGroupName, tCategoryName, formatMonth } = useI18n();
   const [hoveredSlice, setHoveredSlice] = useState<string | null>(null);
 
   const outflowGroups = summary.groups.filter(
@@ -81,7 +83,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
       (workspace === 'combined' || tx.mode === workspace) &&
       tx.monthKey === summary.monthKey
     ) {
-      const clientName = tx.client || tx.description || 'General Revenue';
+      const clientName = tx.client || tx.description || t('tx.general');
       clientRevenueMap.set(
         clientName,
         (clientRevenueMap.get(clientName) ?? 0) + tx.amount
@@ -97,10 +99,10 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
       {/* Header */}
       <div>
         <h1 className="text-xl font-normal text-ink tracking-tight">
-          Financial Reports, Breakdowns & Charts
+          {t('reports.title')}
         </h1>
         <p className="text-xs text-ink-2 mt-0.5">
-          Visual analysis of monthly budgets vs. actuals, category allocations, 12-month cashflow, and tax reserves ({summary.monthKey}).
+          {tf('reports.subtitle', { month: summary.monthKey })}
         </p>
       </div>
 
@@ -108,27 +110,27 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
           <div className="flex items-center justify-between text-xs text-ink-3">
-            <span className="uppercase tracking-[0.08em]">Monthly Income</span>
+            <span className="uppercase tracking-[0.08em]">{t('reports.kpiIncome')}</span>
             <TrendingUp className="w-4 h-4 text-positive" />
           </div>
           <div className="text-xl font-semibold text-positive tabular-nums">
             {formatCurrency(summary.incomeActual, currency)}
           </div>
           <div className="text-[11px] text-ink-2 tabular-nums">
-            Planned Budget: {formatCurrency(summary.incomeBudget, currency)}
+            {tf('reports.plannedBudget', { amount: formatCurrency(summary.incomeBudget, currency) })}
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
           <div className="flex items-center justify-between text-xs text-ink-3">
-            <span className="uppercase tracking-[0.08em]">Total Outflow</span>
+            <span className="uppercase tracking-[0.08em]">{t('reports.kpiOutflow')}</span>
             <TrendingDown className="w-4 h-4 text-accent" />
           </div>
           <div className="text-xl font-semibold text-ink tabular-nums">
             {formatCurrency(summary.totalOutflowActual, currency)}
           </div>
           <div className="text-[11px] text-ink-2 tabular-nums">
-            Budget: {formatCurrency(summary.totalOutflowBudget, currency)} (
+            {t('finance.budget')}: {formatCurrency(summary.totalOutflowBudget, currency)} (
             <span
               className={
                 summary.totalOutflowDifference >= 0
@@ -137,7 +139,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
               }
             >
               {summary.totalOutflowDifference >= 0 ? '+' : ''}
-              {formatNumber(summary.totalOutflowDifference)} diff
+              {formatNumber(summary.totalOutflowDifference)} {t('reports.diffSuffix')}
             </span>
             )
           </div>
@@ -145,7 +147,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
 
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
           <div className="flex items-center justify-between text-xs text-ink-3">
-            <span className="uppercase tracking-[0.08em]">Net Surplus / Cashflow</span>
+            <span className="uppercase tracking-[0.08em]">{t('reports.kpiNetSurplus')}</span>
             {summary.netActual >= 0 ? (
               <CheckCircle2 className="w-4 h-4 text-positive" />
             ) : (
@@ -160,20 +162,20 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
             {formatCurrency(summary.netActual, currency)}
           </div>
           <div className="text-[11px] text-ink-2 tabular-nums">
-            Planned Net: {formatCurrency(summary.netBudget, currency)}
+            {tf('reports.plannedNet', { amount: formatCurrency(summary.netBudget, currency) })}
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface border border-line space-y-1">
           <div className="flex items-center justify-between text-xs text-ink-3">
-            <span className="uppercase tracking-[0.08em]">Savings & Retention Rate</span>
+            <span className="uppercase tracking-[0.08em]">{t('reports.kpiRetention')}</span>
             <PieChartIcon className="w-4 h-4 text-indigo" />
           </div>
           <div className="text-xl font-semibold text-indigo tabular-nums">
             {summary.savingsRatePct.toFixed(1)}%
           </div>
           <div className="text-[11px] text-ink-2">
-            Of total income retained or saved
+            {t('reports.retainedDesc')}
           </div>
         </div>
       </div>
@@ -184,10 +186,10 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
         <section className="lg:col-span-5 p-5 rounded-xl bg-surface border border-line flex flex-col justify-between">
           <div>
             <h2 className="text-sm font-medium text-ink">
-              Outflow Breakdown by Group
+              {t('reports.donutTitle')}
             </h2>
             <p className="text-[11px] text-ink-3 mt-0.5">
-              Share of total monthly expenses & savings ({formatCurrency(summary.totalOutflowActual, currency)})
+              {tf('reports.donutDesc', { amount: formatCurrency(summary.totalOutflowActual, currency) })}
             </p>
           </div>
 
@@ -229,14 +231,14 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4 pointer-events-none">
                 <span className="text-[10px] uppercase tracking-wider text-ink-3">
-                  Total Outflow
+                  {t('reports.totalOutflowUpper')}
                 </span>
                 <span className="text-sm font-semibold text-ink tabular-nums mt-0.5">
                   {formatCurrency(summary.totalOutflowActual, currency)}
                 </span>
                 <span className="text-[11px] text-positive tabular-nums">
                   {summary.incomeActual > 0
-                    ? `${Math.round((summary.totalOutflowActual / summary.incomeActual) * 100)}% of income`
+                    ? tf('reports.pctOfIncome', { pct: Math.round((summary.totalOutflowActual / summary.incomeActual) * 100) })
                     : ''}
                 </span>
               </div>
@@ -259,7 +261,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
                       className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: gs.group.color }}
                     />
-                    <span className="text-ink truncate">{gs.group.name}</span>
+                    <span className="text-ink truncate">{tGroupName(gs.group)}</span>
                   </div>
                   <div className="flex items-center gap-3 tabular-nums">
                     <span className="text-ink-3 text-[11px]">{pct}%</span>
@@ -278,20 +280,20 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-medium text-ink">
-                Budget vs. Actual by Category Group
+                {t('reports.barChartTitle')}
               </h2>
               <p className="text-[11px] text-ink-3 mt-0.5">
-                Planned budget (top bar) compared against actual spending (bottom bar)
+                {t('reports.barChartDesc')}
               </p>
             </div>
             <div className="flex items-center gap-3 text-[11px] text-ink-2">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-ink-3/40" />
-                Budget
+                {t('finance.budget')}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-indigo" />
-                Actual
+                {t('finance.actual')}
               </span>
             </div>
           </div>
@@ -311,13 +313,13 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
               return (
                 <div key={gs.group.id} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-ink">{gs.group.name}</span>
+                    <span className="font-medium text-ink">{tGroupName(gs.group)}</span>
                     <div className="flex items-center gap-3 tabular-nums text-[11px]">
                       <span className="text-ink-3">
-                        Budget: {formatNumber(gs.totalBudget)}
+                        {t('finance.budget')}: {formatNumber(gs.totalBudget)}
                       </span>
                       <span className="text-ink font-medium">
-                        Actual: {formatNumber(gs.totalActual)}
+                        {t('finance.actual')}: {formatNumber(gs.totalActual)}
                       </span>
                       <span
                         className={`w-16 text-right font-medium ${
@@ -366,10 +368,10 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
             <BarChart3 className="w-4 h-4 text-indigo" />
             <div>
               <h2 className="text-sm font-medium text-ink">
-                12-Month Cashflow & Net Trajectory ({state.settings.activeYear})
+                {tf('reports.annualTitle', { year: state.settings.activeYear })}
               </h2>
               <p className="text-[11px] text-ink-3">
-                Monthly Income vs. Total Outflow across all 12 months of the year
+                {t('reports.annualDesc')}
               </p>
             </div>
           </div>
@@ -377,15 +379,15 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
           <div className="flex items-center gap-4 text-[11px] text-ink-2">
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-xs bg-positive" />
-              Income
+              {t('finance.income')}
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-xs bg-accent/80" />
-              Expenses
+              {t('finance.expenses')}
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-xs bg-ink-3/30" />
-              Planned Budget
+              {t('reports.plannedBudgetLegend')}
             </span>
           </div>
         </div>
@@ -399,6 +401,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
               const incH = Math.max(4, Math.round((incVal / maxAnnualVal) * 160));
               const outH = Math.max(4, Math.round((outVal / maxAnnualVal) * 160));
               const isCurrentMonth = pt.monthKey === summary.monthKey;
+              const mLabel = formatMonth(pt.month, 'short');
 
               return (
                 <div
@@ -406,7 +409,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
                   className={`flex flex-col items-center gap-1.5 p-1 rounded-lg transition-colors ${
                     isCurrentMonth ? 'bg-raised/80 ring-1 ring-line' : 'hover:bg-raised/40'
                   }`}
-                  title={`${pt.monthLabel}: Income ${formatCurrency(incVal, currency)} | Outflow ${formatCurrency(outVal, currency)} | NET ${formatCurrency(incVal - outVal, currency)}`}
+                  title={`${mLabel}: ${t('finance.income')} ${formatCurrency(incVal, currency)} | ${t('reports.kpiOutflow')} ${formatCurrency(outVal, currency)} | ${t('finance.net')} ${formatCurrency(incVal - outVal, currency)}`}
                 >
                   <div className="w-full flex items-end justify-center gap-1 h-40">
                     <div
@@ -435,7 +438,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
                       isCurrentMonth ? 'text-ink font-semibold' : 'text-ink-2'
                     }`}
                   >
-                    {pt.monthLabel}
+                    {mLabel}
                   </span>
                 </div>
               );
@@ -450,10 +453,10 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
         <section className="p-5 rounded-xl bg-surface border border-line space-y-3">
           <div>
             <h2 className="text-sm font-medium text-ink">
-              Top Individual Expense Categories
+              {t('reports.topCategoriesTitle')}
             </h2>
             <p className="text-[11px] text-ink-3">
-              Largest cost drivers in {summary.monthKey} ranked by actual spend
+              {tf('reports.topCategoriesDesc', { month: summary.monthKey })}
             </p>
           </div>
 
@@ -475,17 +478,17 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
                     />
                     <div className="truncate">
                       <span className="text-ink font-medium">
-                        {row.category.name}
+                        {tCategoryName(row.category)}
                       </span>
                       <span className="text-[10px] text-ink-3 ml-2 uppercase">
-                        {row.group.name}
+                        {tGroupName(row.group)}
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 tabular-nums shrink-0">
                     <span className="text-[11px] text-ink-3">{sharePct}%</span>
-                    <span className="text-ink-2 w-16 text-right">
-                      B: {formatNumber(row.budget)}
+                    <span className="text-ink-2 w-20 text-right">
+                      {t('finance.budget')}: {formatNumber(row.budget)}
                     </span>
                     <span className="text-ink font-semibold w-20 text-right">
                       {formatCurrency(row.actual, currency)}
@@ -503,10 +506,10 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
             <Briefcase className="w-4 h-4 text-indigo" />
             <div>
               <h2 className="text-sm font-medium text-ink">
-                Freelancer Tax, VAT & Client Breakdown
+                {t('reports.taxBreakdownTitle')}
               </h2>
               <p className="text-[11px] text-ink-3">
-                Tax-deductible business expenses, VAT settlement & client revenue
+                {t('reports.taxBreakdownDesc')}
               </p>
             </div>
           </div>
@@ -514,7 +517,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-lg bg-app border border-line">
               <span className="text-[10px] uppercase text-ink-3">
-                Deductible Expenses
+                {t('reports.deductibleExpenses')}
               </span>
               <div className="text-sm font-semibold text-indigo tabular-nums mt-0.5">
                 {formatCurrency(summary.deductibleExpensesActual, currency)}
@@ -522,7 +525,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
             </div>
             <div className="p-3 rounded-lg bg-app border border-line">
               <span className="text-[10px] uppercase text-ink-3">
-                Net VAT Payable
+                {t('reports.netVatPayable')}
               </span>
               <div className="text-sm font-semibold text-ink tabular-nums mt-0.5">
                 {formatCurrency(summary.netVatPayable, currency)}
@@ -530,7 +533,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
             </div>
             <div className="p-3 rounded-lg bg-app border border-line">
               <span className="text-[10px] uppercase text-ink-3">
-                VAT Collected (Output)
+                {t('reports.vatCollectedOutput')}
               </span>
               <div className="text-sm font-medium text-ink-2 tabular-nums mt-0.5">
                 {formatCurrency(summary.vatCollected, currency)}
@@ -538,7 +541,7 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
             </div>
             <div className="p-3 rounded-lg bg-app border border-line">
               <span className="text-[10px] uppercase text-ink-3">
-                Input VAT Credit
+                {t('reports.inputVatCredit')}
               </span>
               <div className="text-sm font-medium text-positive tabular-nums mt-0.5">
                 {formatCurrency(summary.vatPaidOnExpenses, currency)}
@@ -548,11 +551,11 @@ export const ReportsChartsView: React.FC<ReportsChartsViewProps> = ({
 
           <div className="space-y-1.5 pt-2 border-t border-line">
             <span className="text-[11px] uppercase tracking-wider text-ink-3 font-medium">
-              Income Sources / Clients ({summary.monthKey})
+              {tf('reports.incomeSourcesTitle', { month: summary.monthKey })}
             </span>
             {clientRevenueList.length === 0 ? (
               <p className="text-xs text-ink-3 py-2">
-                No income entries logged for this month yet.
+                {t('reports.noIncomeLogged')}
               </p>
             ) : (
               clientRevenueList.map(([clientName, amt]) => (

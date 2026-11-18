@@ -37,6 +37,7 @@ import { hi } from './locales/hi';
 import { id } from './locales/id';
 import { vi } from './locales/vi';
 import { th } from './locales/th';
+import type { AccountLiquidityClass, AccountType } from '../types';
 
 export type { TranslationKey };
 
@@ -136,18 +137,102 @@ export function detectInitialLanguage(): string {
   return DICTIONARIES[base] ? base : 'en';
 }
 
+function buildLowerEnIndex(prefix: string): Map<string, TranslationKey> {
+  const map = new Map<string, TranslationKey>();
+  for (const key of Object.keys(en) as TranslationKey[]) {
+    if (!key.startsWith(prefix)) continue;
+    const lower = en[key].trim().toLowerCase();
+    if (lower && !map.has(lower)) map.set(lower, key);
+  }
+  return map;
+}
+
+const GROUP_BY_LOWER_EN = buildLowerEnIndex('catGroup.');
+const ITEM_BY_LOWER_EN = buildLowerEnIndex('catItem.');
+const ACC_BY_LOWER_EN = buildLowerEnIndex('defaultAcc.');
+const GOAL_BY_LOWER_EN = buildLowerEnIndex('defaultGoal.');
+
+function formatTemplate(
+  template: string,
+  vars?: Record<string, string | number>,
+): string {
+  if (!vars) return template;
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (m, k) =>
+    k in vars ? String(vars[k]) : m,
+  );
+}
+
+function resolveCatalogLabel(
+  prefix: 'catGroup.' | 'catItem.' | 'defaultAcc.' | 'defaultGoal.',
+  byLowerEn: Map<string, TranslationKey>,
+  input: string | { id?: string; name: string },
+  t: (key: TranslationKey) => string,
+): string {
+  const id = typeof input === 'string' ? undefined : input.id;
+  const rawName = typeof input === 'string' ? input : input.name;
+  const trimmed = rawName.trim();
+  if (!trimmed) return rawName;
+  if (id) {
+    const byIdKey = `${prefix}${id}` as TranslationKey;
+    if (byIdKey in en) {
+      return trimmed.toLowerCase() === en[byIdKey].trim().toLowerCase()
+        ? t(byIdKey)
+        : rawName;
+    }
+  }
+  const byEnKey = byLowerEn.get(trimmed.toLowerCase());
+  return byEnKey ? t(byEnKey) : rawName;
+}
+
 interface I18nContextValue {
   language: string;
   setLanguage: (code: string) => void;
   t: (key: TranslationKey) => string;
+  tf: (key: TranslationKey, vars?: Record<string, string | number>) => string;
   intlLocale: string;
+  tGroupName: (group: string | { id?: string; name: string }) => string;
+  tCategoryName: (cat: string | { id?: string; name: string }) => string;
+  tAccountName: (acc: string | { id?: string; name: string }) => string;
+  tGoalName: (goal: string | { id?: string; name: string }) => string;
+  tAccType: (type: AccountType | string) => string;
+  tAccTypeShort: (type: AccountType | string) => string;
+  tAccClass: (cls: AccountLiquidityClass | string) => string;
+  tAccClassOpt: (cls: AccountLiquidityClass | string) => string;
+  formatMonth: (month1To12: number, style?: 'long' | 'short') => string;
 }
+
+const defaultT = (key: TranslationKey) => en[key];
 
 const I18nContext = createContext<I18nContextValue>({
   language: 'en',
   setLanguage: () => undefined,
-  t: (key) => en[key],
+  t: defaultT,
+  tf: (key, vars) => formatTemplate(en[key], vars),
   intlLocale: 'en-GB',
+  tGroupName: (g) => resolveCatalogLabel('catGroup.', GROUP_BY_LOWER_EN, g, defaultT),
+  tCategoryName: (c) => resolveCatalogLabel('catItem.', ITEM_BY_LOWER_EN, c, defaultT),
+  tAccountName: (a) => resolveCatalogLabel('defaultAcc.', ACC_BY_LOWER_EN, a, defaultT),
+  tGoalName: (g) => resolveCatalogLabel('defaultGoal.', GOAL_BY_LOWER_EN, g, defaultT),
+  tAccType: (tp) => {
+    const k = `accType.${tp}` as TranslationKey;
+    return k in en ? en[k] : tp;
+  },
+  tAccTypeShort: (tp) => {
+    const k = `accTypeShort.${tp}` as TranslationKey;
+    return k in en ? en[k] : tp;
+  },
+  tAccClass: (c) => {
+    const k = `accClass.${c}` as TranslationKey;
+    return k in en ? en[k] : c;
+  },
+  tAccClassOpt: (c) => {
+    const k = `accClassOpt.${c}` as TranslationKey;
+    return k in en ? en[k] : c;
+  },
+  formatMonth: (month1To12, style = 'long') =>
+    new Intl.DateTimeFormat('en-GB', { month: style }).format(
+      new Date(2024, Math.max(0, Math.min(11, month1To12 - 1)), 1),
+    ),
 });
 
 export const I18nProvider: React.FC<{
@@ -179,11 +264,38 @@ export const I18nProvider: React.FC<{
 
   const value = useMemo<I18nContextValue>(() => {
     const dict = DICTIONARIES[language] ?? en;
+    const intlLocale = LANGUAGES.find((l) => l.code === language)?.intl ?? 'en-GB';
+    const t = (key: TranslationKey) => dict[key] ?? en[key];
     return {
       language,
       setLanguage,
-      t: (key) => dict[key] ?? en[key],
-      intlLocale: LANGUAGES.find((l) => l.code === language)?.intl ?? 'en-GB',
+      t,
+      tf: (key, vars) => formatTemplate(t(key), vars),
+      intlLocale,
+      tGroupName: (g) => resolveCatalogLabel('catGroup.', GROUP_BY_LOWER_EN, g, t),
+      tCategoryName: (c) => resolveCatalogLabel('catItem.', ITEM_BY_LOWER_EN, c, t),
+      tAccountName: (a) => resolveCatalogLabel('defaultAcc.', ACC_BY_LOWER_EN, a, t),
+      tGoalName: (g) => resolveCatalogLabel('defaultGoal.', GOAL_BY_LOWER_EN, g, t),
+      tAccType: (tp) => {
+        const k = `accType.${tp}` as TranslationKey;
+        return k in en ? t(k) : tp;
+      },
+      tAccTypeShort: (tp) => {
+        const k = `accTypeShort.${tp}` as TranslationKey;
+        return k in en ? t(k) : tp;
+      },
+      tAccClass: (c) => {
+        const k = `accClass.${c}` as TranslationKey;
+        return k in en ? t(k) : c;
+      },
+      tAccClassOpt: (c) => {
+        const k = `accClassOpt.${c}` as TranslationKey;
+        return k in en ? t(k) : c;
+      },
+      formatMonth: (month1To12, style = 'long') =>
+        new Intl.DateTimeFormat(intlLocale, { month: style }).format(
+          new Date(2024, Math.max(0, Math.min(11, month1To12 - 1)), 1),
+        ),
     };
   }, [language, setLanguage]);
 

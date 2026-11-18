@@ -102,7 +102,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   onOpenWebDavVault,
   onClose,
 }) => {
-  const { t } = useI18n();
+  const { t, tGroupName, tCategoryName, tAccountName } = useI18n();
   const [step, setStep] = useState<OnboardingStep>(1);
 
   // Step 1 state: Profile & Currency
@@ -548,7 +548,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               type="button"
               onClick={onOpenImportModal}
               className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/70 transition-colors cursor-pointer"
-              title="Import existing data or restore a backup"
+              title={t('topbar.importTip')}
             >
               <Upload className="w-3.5 h-3.5 text-indigo" />
               <span>{t('onboarding.importExisting')}</span>
@@ -821,7 +821,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                               style={{ backgroundColor: grp.color }}
                             />
                             <span className="text-[11px] font-semibold uppercase tracking-wider text-ink truncate">
-                              {grp.name}
+                              {tGroupName(grp)}
                             </span>
                             <span className="text-[10px] text-ink-3 tabular-nums">
                               ({checkedCount})
@@ -880,7 +880,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                   ) : (
                                     <Plus className="w-3 h-3 text-ink-3 shrink-0" />
                                   )}
-                                  <span>{item.name}</span>
+                                  <span>{tCategoryName(item)}</span>
                                 </button>
 
                                 <button
@@ -889,11 +889,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                     e.stopPropagation();
                                     toggleRecurringCategory(grp.mode, item.id);
                                   }}
-                                  title={
-                                    isRecurring
-                                      ? `${item.name}: Set as recurring monthly item (click to disable recurring)`
-                                      : `${item.name}: One-off / variable item (click to set as recurring monthly)`
-                                  }
+                                  title={`${tCategoryName(item)}: ${t(isRecurring ? 'worksheet.recurringDisableTip' : 'worksheet.recurringEnableTip')}`}
                                   className={`h-full px-1.5 inline-flex items-center justify-center border-l transition-colors cursor-pointer ${
                                     isRecurring
                                       ? 'bg-indigo/15 text-indigo border-indigo/30 hover:bg-indigo/25'
@@ -925,11 +921,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                   onClick={() =>
                                     toggleRecurringCategory(grp.mode, customKey)
                                   }
-                                  title={
-                                    isRecurring
-                                      ? `${cName}: Recurring monthly item (click to disable)`
-                                      : `${cName}: Click to mark as recurring monthly item`
-                                  }
+                                  title={`${cName}: ${t(isRecurring ? 'worksheet.recurringDisableTip' : 'worksheet.recurringEnableTip')}`}
                                   className={`h-full px-1.5 inline-flex items-center justify-center border-l transition-colors cursor-pointer ${
                                     isRecurring
                                       ? 'bg-indigo/15 text-indigo border-indigo/30 hover:bg-indigo/25'
@@ -945,7 +937,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                     handleRemoveCustomCategory(grp.id, idx)
                                   }
                                   className="h-full px-1.5 inline-flex items-center justify-center border-l border-line/60 text-ink-3 hover:text-accent cursor-pointer"
-                                  title="Remove custom category"
+                                  title={t('common.remove')}
                                 >
                                   <X className="w-2.5 h-2.5" />
                                 </button>
@@ -1047,7 +1039,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                         <div className="flex items-center gap-1.5">
                           <input
                             type="text"
-                            value={acc.name}
+                            value={tAccountName(acc)}
                             onChange={(e) =>
                               updateDraftAccount(acc.id, {
                                 name: e.target.value,
@@ -1151,7 +1143,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                         <div className="flex items-center gap-1.5">
                           <input
                             type="text"
-                            value={acc.name}
+                            value={tAccountName(acc)}
                             onChange={(e) =>
                               updateDraftAccount(acc.id, {
                                 name: e.target.value,

@@ -28,6 +28,7 @@ import {
   MonthSummaryMetrics,
 } from '../utils/calculations';
 import { formatMonthKey } from '../data/templates';
+import { useI18n } from '../i18n';
 
 interface MonthlyWorksheetViewProps {
   summary: MonthSummaryMetrics;
@@ -84,6 +85,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
   onApplyBudgetsToAllMonths,
   onCopyMonthValues,
 }) => {
+  const { t, tf, tGroupName, tCategoryName } = useI18n();
   const [hideZeroRows, setHideZeroRows] = useState(
     settings.defaultHideZeroRows ?? false
   );
@@ -146,7 +148,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         ? summary.monthKey
         : mode === 'current_to_next'
           ? nextMonthKey
-          : `All 12 Months (${settings.activeYear})`;
+          : tf('worksheet.copyModalAll12Target', { year: settings.activeYear });
 
     if (settings.confirmBeforeMonthCopy === false) {
       if (mode === 'all_months') {
@@ -241,6 +243,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
 
     const isPositiveDiff = row.difference > 0.004;
     const isNegativeDiff = row.difference < -0.004;
+    const displayCategoryName = tCategoryName(row.category);
 
     return (
       <div
@@ -251,10 +254,10 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         <div className="flex items-center gap-1.5 min-w-0 pr-1">
           <input
             type="text"
-            value={row.category.name}
+            value={displayCategoryName}
             onChange={(e) => onRenameCategory(row.category.id, e.target.value)}
             className="w-full bg-transparent text-ink truncate focus:outline-none focus:bg-surface focus:px-1.5 rounded"
-            title={row.category.name}
+            title={displayCategoryName}
           />
           <button
             type="button"
@@ -266,8 +269,8 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             }`}
             title={
               row.category.isRecurring
-                ? 'Recurring monthly item (click to disable recurring)'
-                : 'Mark as recurring monthly item'
+                ? t('worksheet.recurringDisableTip')
+                : t('worksheet.recurringEnableTip')
             }
           >
             <Repeat className="w-3 h-3" />
@@ -275,16 +278,16 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           {row.txCount > 0 && row.directActual === null && (
             <span
               className="px-1.5 py-0.2 rounded text-[10px] bg-raised text-ink-3 tabular-nums shrink-0"
-              title={`${row.txCount} logged transaction(s)`}
+              title={tf('worksheet.txCountTip', { count: row.txCount })}
             >
-              {row.txCount}tx
+              {tf('worksheet.txCountSuffix', { count: row.txCount })}
             </span>
           )}
           {row.directActual !== null && (
             <button
               onClick={() => onUpdateDirectActual(row.category.id, null)}
               className="text-ink-3 hover:text-ink shrink-0 cursor-pointer"
-              title="Manual actual override active — click to revert to transaction sum"
+              title={t('worksheet.manualActualTip')}
             >
               <RotateCcw className="w-3 h-3" />
             </button>
@@ -294,9 +297,9 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               (row.category.deductiblePct !== undefined &&
                 row.category.deductiblePct < 100)) && (
               <span className="hidden xl:inline-block px-1 py-0.2 rounded text-[9px] bg-indigo/10 text-indigo shrink-0 tabular-nums">
-                {row.category.taxRate ? `${row.category.taxRate}% VAT` : ''}
+                {row.category.taxRate ? `${row.category.taxRate}% ${t('worksheet.vatShort')}` : ''}
                 {row.category.deductiblePct && row.category.deductiblePct < 100
-                  ? ` · ${row.category.deductiblePct}% Ded.`
+                  ? ` · ${row.category.deductiblePct}% ${t('worksheet.dedShort')}`
                   : ''}
               </span>
             )}
@@ -351,14 +354,14 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           <button
             onClick={() => onQuickLogForCategory(row.category.id)}
             className="p-1 rounded text-ink-3 hover:text-ink hover:bg-surface cursor-pointer"
-            title="Log transaction in this category"
+            title={t('worksheet.logTxTip')}
           >
             <Receipt className="w-3 h-3" />
           </button>
           <button
             onClick={() => onDeleteCategory(row.category.id)}
             className="p-1 rounded text-ink-3 hover:text-accent hover:bg-surface cursor-pointer"
-            title="Delete category"
+            title={t('worksheet.deleteCategoryTip')}
           >
             <Trash2 className="w-3 h-3" />
           </button>
@@ -371,6 +374,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
     const isPositiveDiff = gs.totalDifference > 0.004;
     const isNegativeDiff = gs.totalDifference < -0.004;
     const isAdding = addingToGroupId === gs.group.id;
+    const displayGroupName = tGroupName(gs.group);
 
     return (
       <section
@@ -385,31 +389,31 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               style={{ backgroundColor: gs.group.color }}
             />
             <span className="text-ink truncate uppercase tracking-[0.08em]">
-              {gs.group.name}
+              {displayGroupName}
             </span>
             {workspace === 'combined' && (
               <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-surface text-ink-3 font-normal">
-                {gs.group.mode}
+                {t(`workspace.${gs.group.mode}`)}
               </span>
             )}
           </div>
-          <span className="text-right text-ink-2 font-normal">Budget</span>
-          <span className="text-right text-ink-2 font-normal">Actual</span>
-          <span className="text-right text-ink-2 font-normal pr-1">Diff.</span>
+          <span className="text-right text-ink-2 font-normal">{t('finance.budget')}</span>
+          <span className="text-right text-ink-2 font-normal">{t('finance.actual')}</span>
+          <span className="text-right text-ink-2 font-normal pr-1">{t('worksheet.diffShort')}</span>
           <div className="flex items-center justify-end gap-0.5">
             <button
               onClick={() =>
                 setAddingToGroupId(isAdding ? null : gs.group.id)
               }
               className="p-1 rounded text-ink-2 hover:text-ink hover:bg-surface cursor-pointer"
-              title="Add category to this group"
+              title={t('worksheet.addCategoryTip')}
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onDeleteGroup(gs.group.id)}
               className="p-1 rounded text-ink-3 hover:text-accent hover:bg-surface cursor-pointer"
-              title="Delete entire group"
+              title={t('worksheet.deleteGroupTip')}
             >
               <Trash2 className="w-3 h-3" />
             </button>
@@ -431,7 +435,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           >
             <input
               type="text"
-              placeholder="New category name…"
+              placeholder={t('worksheet.newCategoryPlaceholder')}
               value={newCatName}
               onChange={(e) => setNewCatName(e.target.value)}
               autoFocus
@@ -440,7 +444,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             <input
               type="number"
               step="0.05"
-              placeholder="Budget (0)"
+              placeholder={t('worksheet.budgetZeroPlaceholder')}
               value={newCatBudget}
               onChange={(e) => setNewCatBudget(e.target.value)}
               className="w-24 h-7 px-2 rounded bg-surface border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
@@ -449,21 +453,21 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               type="submit"
               className="h-7 px-2.5 rounded bg-ink text-on-ink text-xs cursor-pointer"
             >
-              Add
+              {t('common.add')}
             </button>
             <button
               type="button"
               onClick={() => setAddingToGroupId(null)}
               className="h-7 px-2 rounded text-xs text-ink-2 hover:bg-raised cursor-pointer"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </form>
         )}
 
         {/* Group Total Footer (Matches Excel "Total HOME EXPENSES", etc.) */}
         <div className="grid grid-cols-[1fr_84px_84px_84px_48px] items-center gap-1.5 px-3 py-2 bg-app/80 border-t border-line text-[12px] font-semibold">
-          <span className="text-ink truncate">Total {gs.group.name}</span>
+          <span className="text-ink truncate">{tf('worksheet.totalGroup', { group: displayGroupName })}</span>
           <span className="text-right tabular-nums text-ink-2 px-1.5">
             {formatNumber(gs.totalBudget)}
           </span>
@@ -495,13 +499,13 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         <div>
           <h1 className="text-xl font-normal text-ink tracking-tight">
             {workspace === 'home'
-              ? 'Personal Monthly Budget'
+              ? t('worksheet.titleHome')
               : workspace === 'freelancer'
-                ? 'Freelancer Business Budget & P&L'
-                : 'Combined Home & Freelancer Worksheet'}
+                ? t('worksheet.titleFreelancer')
+                : t('worksheet.titleCombined')}
           </h1>
           <p className="text-xs text-ink-2 mt-0.5">
-            Click any Budget or Actual figure to edit directly inline, or log itemized transactions.
+            {t('worksheet.subtitle')}
           </p>
         </div>
 
@@ -513,41 +517,41 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                 ? 'bg-raised border-ink text-ink font-medium'
                 : 'bg-surface border-line text-ink-2 hover:text-ink hover:bg-raised'
             }`}
-            title="Hide or show categories with 0.00 Budget and 0.00 Actual"
+            title={t('worksheet.hideZeroRowsTip')}
           >
             {hideZeroRows ? (
               <Eye className="w-3.5 h-3.5 text-accent" />
             ) : (
               <EyeOff className="w-3.5 h-3.5" />
             )}
-            <span>{hideZeroRows ? 'Showing Active Only' : 'Hide Zero Rows'}</span>
+            <span>{hideZeroRows ? t('worksheet.showingActive') : t('worksheet.hideZeroRows')}</span>
           </button>
 
           <button
             onClick={() => triggerMonthCopyAction('prev_to_current')}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
-            title={`Copy values from previous month (${prevMonthKey}) into this month (${summary.monthKey})`}
+            title={tf('worksheet.copyPrevHereTip', { prev: prevMonthKey, curr: summary.monthKey })}
           >
             <CopyCheck className="w-3.5 h-3.5 text-indigo" />
-            <span>Copy {prevMonthKey} → Here</span>
+            <span>{tf('worksheet.copyPrevHere', { prev: prevMonthKey })}</span>
           </button>
 
           <button
             onClick={() => triggerMonthCopyAction('current_to_next')}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
-            title={`Copy this month's values (${summary.monthKey}) into next month (${nextMonthKey})`}
+            title={tf('worksheet.copyNextMonthTip', { curr: summary.monthKey, next: nextMonthKey })}
           >
             <ArrowRight className="w-3.5 h-3.5 text-positive" />
-            <span>Copy into Next Month ({nextMonthKey})</span>
+            <span>{tf('worksheet.copyNextMonth', { next: nextMonthKey })}</span>
           </button>
 
           <button
             onClick={() => triggerMonthCopyAction('all_months')}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
-            title="Copy this month's planned Budget amounts across all 12 months of the year"
+            title={t('worksheet.applyAll12Tip')}
           >
             <CopyCheck className="w-3.5 h-3.5 text-positive" />
-            <span>Apply to All 12 Months</span>
+            <span>{t('worksheet.applyAll12')}</span>
           </button>
 
           <button
@@ -555,7 +559,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs hover:opacity-90 transition-opacity cursor-pointer"
           >
             <FolderPlus className="w-3.5 h-3.5" />
-            <span>New Category Group</span>
+            <span>{t('worksheet.newGroup')}</span>
           </button>
         </div>
       </div>
@@ -568,9 +572,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             <div className="flex items-center gap-2.5 text-xs">
               <CopyCheck className="w-4 h-4 text-indigo shrink-0" />
               <span className="text-ink">
-                <strong>{summary.monthKey}</strong> has no budget or actual values yet, while previous month{' '}
-                <strong>{prevMonthKey}</strong> has configured values. Would you like to copy last month&apos;s values into{' '}
-                <strong>{summary.monthKey}</strong>?
+                {tf('worksheet.carryOverBefore', { curr: summary.monthKey, prev: prevMonthKey })}
               </span>
             </div>
             <button
@@ -578,7 +580,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 cursor-pointer shrink-0"
             >
               <CopyCheck className="w-3.5 h-3.5" />
-              <span>Copy {prevMonthKey} Values…</span>
+              <span>{tf('worksheet.copyPrevValuesBtn', { prev: prevMonthKey })}</span>
             </button>
           </div>
         )}
@@ -591,7 +593,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-accent" />
                 <h3 className="text-sm font-medium text-ink">
-                  Confirm Copying Monthly Values
+                  {t('worksheet.copyModalTitle')}
                 </h3>
               </div>
               <button
@@ -604,22 +606,17 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
 
             <div className="p-5 space-y-4 text-xs">
               <p className="text-ink leading-relaxed">
-                Are you sure you want to copy values from{' '}
-                <strong className="font-semibold">
-                  {copyModalState.sourceMonthKey}
-                </strong>{' '}
-                into{' '}
-                <strong className="font-semibold">
-                  {copyModalState.targetMonthKey}
-                </strong>
-                ?
+                {tf('worksheet.copyModalPrompt', {
+                  source: copyModalState.sourceMonthKey,
+                  target: copyModalState.targetMonthKey,
+                })}
               </p>
 
               {copyModalState.mode !== 'all_months' && (
                 <div className="space-y-3 p-3.5 rounded-xl bg-app border border-line">
                   <div>
                     <label className="block text-[11px] text-ink-2 mb-1.5 font-medium">
-                      Values to Copy
+                      {t('worksheet.copyModalScopeLabel')}
                     </label>
                     <select
                       value={copyModalState.scope}
@@ -632,10 +629,10 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                       className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
                     >
                       <option value="budgets_and_actuals">
-                        Both Planned Budgets & Direct Actuals
+                        {t('onboarding.s4.copyScopeBoth')}
                       </option>
                       <option value="budgets_only">
-                        Planned Budgets Only (Leave Actuals at 0)
+                        {t('settings.copy.scopeBudgetsOnly')}
                       </option>
                     </select>
                   </div>
@@ -653,8 +650,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                       className="rounded border-line"
                     />
                     <span>
-                      Overwrite existing non-zero entries in{' '}
-                      {copyModalState.targetMonthKey}
+                      {tf('worksheet.copyModalOverwrite', { target: copyModalState.targetMonthKey })}
                     </span>
                   </label>
 
@@ -672,8 +668,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                         className="rounded border-line"
                       />
                       <span>
-                        Switch active month to {copyModalState.targetMonthKey}{' '}
-                        after copying
+                        {tf('worksheet.copyModalSwitchMonth', { target: copyModalState.targetMonthKey })}
                       </span>
                     </label>
                   )}
@@ -693,7 +688,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                   className="rounded border-line"
                 />
                 <span>
-                  Don&apos;t ask for confirmation again (can be changed in Settings)
+                  {t('worksheet.copyModalDontAsk')}
                 </span>
               </label>
             </div>
@@ -704,7 +699,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                 onClick={() => setCopyModalState(null)}
                 className="h-8 px-3.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised cursor-pointer"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -712,7 +707,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                 className="h-8 px-4 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 cursor-pointer"
               >
                 <CopyCheck className="w-3.5 h-3.5" />
-                <span>Yes, Copy Values</span>
+                <span>{t('worksheet.copyModalConfirmBtn')}</span>
               </button>
             </div>
           </div>
@@ -727,11 +722,11 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         >
           <div className="flex-1 min-w-[200px]">
             <label className="block text-[11px] text-ink-2 mb-1">
-              Group Name
+              {t('worksheet.groupNameLabel')}
             </label>
             <input
               type="text"
-              placeholder="e.g. REAL ESTATE, SIDE PROJECT, PETS"
+              placeholder={t('worksheet.groupNamePlaceholder')}
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               autoFocus
@@ -742,43 +737,43 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           {workspace === 'combined' && (
             <div>
               <label className="block text-[11px] text-ink-2 mb-1">
-                Ledger Mode
+                {t('worksheet.ledgerModeLabel')}
               </label>
               <select
                 value={newGroupMode}
                 onChange={(e) => setNewGroupMode(e.target.value as LedgerMode)}
                 className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
               >
-                <option value="home">Home Budget</option>
-                <option value="freelancer">Freelancer</option>
+                <option value="home">{t('onboarding.home')}</option>
+                <option value="freelancer">{t('workspace.freelancer')}</option>
               </select>
             </div>
           )}
 
           <div>
-            <label className="block text-[11px] text-ink-2 mb-1">Type</label>
+            <label className="block text-[11px] text-ink-2 mb-1">{t('worksheet.typeLabel')}</label>
             <select
               value={newGroupKind}
               onChange={(e) => setNewGroupKind(e.target.value as CategoryKind)}
               className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
             >
-              <option value="expense">Expense Group</option>
-              <option value="income">Income Group</option>
-              <option value="savings">Savings / Reserve</option>
+              <option value="expense">{t('worksheet.expenseGroupOpt')}</option>
+              <option value="income">{t('worksheet.incomeGroupOpt')}</option>
+              <option value="savings">{t('worksheet.savingsGroupOpt')}</option>
             </select>
           </div>
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
-              Worksheet Column
+              {t('worksheet.columnLabel')}
             </label>
             <select
               value={newGroupCol}
               onChange={(e) => setNewGroupCol(Number(e.target.value) as 0 | 1)}
               className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
             >
-              <option value={0}>Left Column</option>
-              <option value={1}>Right Column</option>
+              <option value={0}>{t('worksheet.leftColumnOpt')}</option>
+              <option value={1}>{t('worksheet.rightColumnOpt')}</option>
             </select>
           </div>
 
@@ -786,14 +781,14 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             type="submit"
             className="h-8 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium cursor-pointer"
           >
-            Create Group
+            {t('worksheet.createGroupBtn')}
           </button>
           <button
             type="button"
             onClick={() => setShowNewGroupForm(false)}
             className="h-8 px-3 rounded-lg text-xs text-ink-2 hover:bg-raised cursor-pointer"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </form>
       )}
@@ -803,49 +798,49 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3.5 rounded-xl bg-surface border border-line">
             <span className="text-[10px] uppercase tracking-[0.1em] text-ink-3">
-              Gross Revenue
+              {t('worksheet.grossRevenue')}
             </span>
             <div className="text-base font-semibold text-positive tabular-nums mt-0.5">
               {formatCurrency(summary.incomeActual, currency)}
             </div>
             <span className="text-[11px] text-ink-3">
-              VAT Collected: {formatCurrency(summary.vatCollected, currency)}
+              {tf('worksheet.vatCollected', { amount: formatCurrency(summary.vatCollected, currency) })}
             </span>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface border border-line">
             <span className="text-[10px] uppercase tracking-[0.1em] text-ink-3">
-              Deductible Business Expenses
+              {t('worksheet.deductibleExp')}
             </span>
             <div className="text-base font-semibold text-indigo tabular-nums mt-0.5">
               {formatCurrency(summary.deductibleExpensesActual, currency)}
             </div>
             <span className="text-[11px] text-ink-3">
-              Input VAT Paid: {formatCurrency(summary.vatPaidOnExpenses, currency)}
+              {tf('worksheet.inputVatPaid', { amount: formatCurrency(summary.vatPaidOnExpenses, currency) })}
             </span>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface border border-line">
             <span className="text-[10px] uppercase tracking-[0.1em] text-ink-3">
-              Net VAT / MWST Payable
+              {t('worksheet.netVatPayable')}
             </span>
             <div className="text-base font-semibold text-ink tabular-nums mt-0.5">
               {formatCurrency(summary.netVatPayable, currency)}
             </div>
             <span className="text-[11px] text-ink-3">
-              Output VAT − Input Tax Credit
+              {t('worksheet.vatFormula')}
             </span>
           </div>
 
           <div className="p-3.5 rounded-xl bg-surface border border-line">
             <span className="text-[10px] uppercase tracking-[0.1em] text-ink-3">
-              Est. Income Tax Set-Aside
+              {t('worksheet.estTaxSetAside')}
             </span>
             <div className="text-base font-semibold text-warning tabular-nums mt-0.5">
               {formatCurrency(summary.estimatedTaxReserve, currency)}
             </div>
             <span className="text-[11px] text-ink-3">
-              Based on net operating profit
+              {t('worksheet.basedOnNetProfit')}
             </span>
           </div>
         </div>
@@ -863,18 +858,18 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           {/* BUDGET SUMMARY Box */}
           <section className="bg-surface border-2 border-ink/80 rounded-xl overflow-hidden shadow-xs">
             <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-2.5 bg-ink text-on-ink text-[11px] font-semibold uppercase tracking-[0.08em]">
-              <span>BUDGET SUMMARY</span>
-              <span className="text-right font-normal opacity-80">Budget</span>
-              <span className="text-right font-normal opacity-80">Actual</span>
+              <span>{t('worksheet.budgetSummary')}</span>
+              <span className="text-right font-normal opacity-80">{t('finance.budget')}</span>
+              <span className="text-right font-normal opacity-80">{t('finance.actual')}</span>
               <span className="text-right font-normal opacity-80">
-                Difference
+                {t('worksheet.difference')}
               </span>
             </div>
 
             <div className="divide-y divide-line text-[13px]">
               {/* Total Income */}
               <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-2.5">
-                <span className="text-ink font-medium">Total Income</span>
+                <span className="text-ink font-medium">{t('sidebar.totalIncome')}</span>
                 <span className="text-right tabular-nums text-ink-2">
                   {formatNumber(summary.incomeBudget)}
                 </span>
@@ -895,7 +890,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
 
               {/* Total Expenses */}
               <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-2.5">
-                <span className="text-ink font-medium">Total Expenses</span>
+                <span className="text-ink font-medium">{t('sidebar.totalExpenses')}</span>
                 <span className="text-right tabular-nums text-ink-2">
                   {formatNumber(summary.totalOutflowBudget)}
                 </span>
@@ -917,9 +912,9 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               {/* NET */}
               <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-3 bg-raised/70 font-semibold">
                 <div className="flex items-center gap-2">
-                  <span className="text-ink">NET</span>
+                  <span className="text-ink">{t('finance.net')}</span>
                   <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-surface border border-line text-ink-2 tabular-nums">
-                    {summary.savingsRatePct.toFixed(1)}% retained
+                    {tf('worksheet.retainedPct', { pct: summary.savingsRatePct.toFixed(1) })}
                   </span>
                 </div>
                 <span className="text-right tabular-nums text-ink-2">

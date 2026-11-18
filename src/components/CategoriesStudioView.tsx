@@ -19,6 +19,7 @@ import {
   HOME_CATEGORY_CATALOG,
   ZEN_PALETTE,
 } from '../data/templates';
+import { useI18n } from '../i18n';
 
 interface CategoriesStudioViewProps {
   groups: CategoryGroup[];
@@ -76,6 +77,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
   onOpenSetupWizard,
   onImportExcelOrCsv,
 }) => {
+  const { t, tf, tGroupName, tCategoryName } = useI18n();
   const [editMode, setEditMode] = useState<LedgerMode>(initialMode);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupKind, setNewGroupKind] = useState<CategoryKind>('expense');
@@ -131,10 +133,10 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-normal text-ink tracking-tight">
-            Categories & Structure
+            {t('categories.title')}
           </h1>
           <p className="text-xs text-ink-2 mt-0.5">
-            Add, rename, reorder, or toggle categories across your Home and Freelancer workspaces.
+            {t('categories.subtitle')}
           </p>
         </div>
 
@@ -144,7 +146,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5 text-accent" />
-            <span>Quick Category Picker</span>
+            <span>{t('categories.quickPickerBtn')}</span>
           </button>
 
           <button
@@ -152,7 +154,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5 text-indigo" />
-            <span>Import from Excel / CSV…</span>
+            <span>{t('categories.importBtn')}</span>
           </button>
 
           {/* Mode Switcher */}
@@ -165,7 +167,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                   : 'text-ink-2 hover:text-ink'
               }`}
             >
-              Home ({categories.filter((c) => c.mode === 'home').length})
+              {t('workspace.home')} ({categories.filter((c) => c.mode === 'home').length})
             </button>
             <button
               onClick={() => setEditMode('freelancer')}
@@ -175,7 +177,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                   : 'text-ink-2 hover:text-ink'
               }`}
             >
-              Freelancer ({categories.filter((c) => c.mode === 'freelancer').length})
+              {t('workspace.freelancer')} ({categories.filter((c) => c.mode === 'freelancer').length})
             </button>
           </div>
         </div>
@@ -188,11 +190,11 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
       >
         <div className="flex-1 min-w-[200px]">
           <label className="block text-[11px] text-ink-2 mb-1">
-            New {editMode === 'home' ? 'Home' : 'Freelancer'} Category Group Name
+            {editMode === 'home' ? t('categories.newHomeGroupLabel') : t('categories.newFreelancerGroupLabel')}
           </label>
           <input
             type="text"
-            placeholder="e.g. INVESTMENTS, CHILDCARE, STUDIO GEAR"
+            placeholder={t('categories.groupPlaceholder')}
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
             className="w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
@@ -200,32 +202,32 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
         </div>
 
         <div>
-          <label className="block text-[11px] text-ink-2 mb-1">Kind</label>
+          <label className="block text-[11px] text-ink-2 mb-1">{t('categories.kindLabel')}</label>
           <select
             value={newGroupKind}
             onChange={(e) => setNewGroupKind(e.target.value as CategoryKind)}
             className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
           >
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
-            <option value="savings">Savings / Reserve</option>
+            <option value="expense">{t('finance.expenses')}</option>
+            <option value="income">{t('finance.income')}</option>
+            <option value="savings">{t('worksheet.savingsGroupOpt')}</option>
           </select>
         </div>
 
         <div>
-          <label className="block text-[11px] text-ink-2 mb-1">Column</label>
+          <label className="block text-[11px] text-ink-2 mb-1">{t('categories.columnLabel')}</label>
           <select
             value={newGroupCol}
             onChange={(e) => setNewGroupCol(Number(e.target.value) as 0 | 1)}
             className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
           >
-            <option value={0}>Left Column</option>
-            <option value={1}>Right Column</option>
+            <option value={0}>{t('worksheet.leftColumnOpt')}</option>
+            <option value={1}>{t('worksheet.rightColumnOpt')}</option>
           </select>
         </div>
 
         <div>
-          <label className="block text-[11px] text-ink-2 mb-1">Accent</label>
+          <label className="block text-[11px] text-ink-2 mb-1">{t('categories.accentLabel')}</label>
           <div className="flex items-center gap-1 h-8 px-2 rounded-lg bg-raised border border-line">
             {ZEN_PALETTE.slice(0, 6).map((c) => (
               <button
@@ -246,7 +248,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
           className="h-8 px-4 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Add Group</span>
+          <span>{t('categories.addGroupBtn')}</span>
         </button>
       </form>
 
@@ -258,13 +260,18 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
             .sort((a, b) => a.order - b.order);
 
           const existingNames = new Set(
-            grpCats.map((c) => c.name.toLowerCase())
+            grpCats.flatMap((c) => [c.name.toLowerCase(), tCategoryName(c).toLowerCase()])
           );
           const catalogGrp = catalog.find(
-            (cg) => cg.id === grp.id || cg.name.toLowerCase() === grp.name.toLowerCase()
+            (cg) =>
+              cg.id === grp.id ||
+              cg.name.toLowerCase() === grp.name.toLowerCase() ||
+              tGroupName(cg).toLowerCase() === tGroupName(grp).toLowerCase()
           );
           const suggestedUnadded = (catalogGrp?.items ?? []).filter(
-            (item) => !existingNames.has(item.name.toLowerCase())
+            (item) =>
+              !existingNames.has(item.name.toLowerCase()) &&
+              !existingNames.has(tCategoryName(item).toLowerCase())
           );
 
           return (
@@ -282,11 +289,10 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       onUpdateGroup(grp.id, { color: e.target.value })
                     }
                     className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent shrink-0"
-                    title="Change group color"
                   />
                   <input
                     type="text"
-                    value={grp.name}
+                    value={tGroupName(grp)}
                     onChange={(e) =>
                       onUpdateGroup(grp.id, { name: e.target.value })
                     }
@@ -302,10 +308,9 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       })
                     }
                     className="px-2 py-0.5 rounded bg-surface border border-line text-[10px] text-ink-2 hover:text-ink inline-flex items-center gap-1 cursor-pointer"
-                    title="Switch between Left and Right worksheet column"
                   >
                     <ArrowLeftRight className="w-2.5 h-2.5" />
-                    <span>{grp.column === 0 ? 'Left Col' : 'Right Col'}</span>
+                    <span>{grp.column === 0 ? t('categories.leftCol') : t('categories.rightCol')}</span>
                   </button>
 
                   <button
@@ -315,7 +320,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       )
                     }
                     className="p-1 rounded bg-surface border border-line text-ink-2 hover:text-ink cursor-pointer"
-                    title="Add subcategory"
+                    title={t('worksheet.addCategoryTip')}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -323,7 +328,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                   <button
                     onClick={() => onDeleteGroup(grp.id)}
                     className="p-1 rounded text-ink-3 hover:text-accent cursor-pointer"
-                    title="Delete group"
+                    title={t('worksheet.deleteGroupTip')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -339,7 +344,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                   >
                     <input
                       type="text"
-                      value={cat.name}
+                      value={tCategoryName(cat)}
                       onChange={(e) =>
                         onUpdateCategory(cat.id, { name: e.target.value })
                       }
@@ -357,8 +362,8 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                         }`}
                         title={
                           cat.isRecurring
-                            ? 'Recurring monthly item (click to disable)'
-                            : 'Click to mark as recurring monthly item'
+                            ? t('worksheet.recurringDisableTip')
+                            : t('worksheet.recurringEnableTip')
                         }
                       >
                         <Repeat className="w-3 h-3" />
@@ -366,7 +371,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
 
                       <div className="flex items-center gap-1">
                         <span className="text-[10px] text-ink-3">
-                          Budget ({currency}):
+                          {tf('categories.budgetCurrencyLabel', { currency })}
                         </span>
                         <input
                           type="number"
@@ -384,7 +389,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       {editMode === 'freelancer' && (
                         <>
                           <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-ink-3">VAT%:</span>
+                            <span className="text-[10px] text-ink-3">{t('worksheet.vatShort')}%:</span>
                             <input
                               type="number"
                               step="0.1"
@@ -398,7 +403,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                             />
                           </div>
                           <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-ink-3">Ded%:</span>
+                            <span className="text-[10px] text-ink-3">{t('worksheet.dedShort')}%:</span>
                             <input
                               type="number"
                               step="10"
@@ -417,7 +422,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       <button
                         onClick={() => onDeleteCategory(cat.id)}
                         className="p-1 text-ink-3 hover:text-accent cursor-pointer"
-                        title="Remove category"
+                        title={t('worksheet.deleteCategoryTip')}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -430,7 +435,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
               {suggestedUnadded.length > 0 && (
                 <div className="px-3 py-2 bg-app/60 border-t border-line/60 space-y-1.5">
                   <span className="block text-[10px] uppercase tracking-wider text-ink-3">
-                    Additional Categories (Click to add)
+                    {t('categories.additionalHeader')}
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {suggestedUnadded.map((sug) => (
@@ -451,7 +456,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                         className="h-6 px-2 rounded-md border border-dashed border-line hover:border-ink-2 text-[11px] text-ink-2 hover:text-ink inline-flex items-center gap-1 cursor-pointer transition-colors"
                       >
                         <Plus className="w-3 h-3 text-ink-3" />
-                        <span>{sug.name}</span>
+                        <span>{tCategoryName(sug)}</span>
                       </button>
                     ))}
                   </div>
@@ -466,7 +471,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                 >
                   <input
                     type="text"
-                    placeholder="Custom category name…"
+                    placeholder={t('categories.customCatPlaceholder')}
                     value={catName}
                     onChange={(e) => setCatName(e.target.value)}
                     autoFocus
@@ -475,7 +480,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                   <input
                     type="number"
                     step="0.05"
-                    placeholder="Default Budget"
+                    placeholder={t('categories.defaultBudgetPlaceholder')}
                     value={catBudget}
                     onChange={(e) => setCatBudget(e.target.value)}
                     className="w-24 h-7 px-2 rounded bg-surface border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
@@ -485,7 +490,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       <input
                         type="number"
                         step="0.1"
-                        placeholder="VAT %"
+                        placeholder={`${t('worksheet.vatShort')} %`}
                         value={catTax}
                         onChange={(e) => setCatTax(e.target.value)}
                         className="w-16 h-7 px-2 rounded bg-surface border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
@@ -493,7 +498,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                       <input
                         type="number"
                         step="10"
-                        placeholder="Ded %"
+                        placeholder={`${t('worksheet.dedShort')} %`}
                         value={catDed}
                         onChange={(e) => setCatDed(e.target.value)}
                         className="w-16 h-7 px-2 rounded bg-surface border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
@@ -505,7 +510,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                     className="h-7 px-2.5 rounded bg-ink text-on-ink text-xs inline-flex items-center gap-1 cursor-pointer"
                   >
                     <Check className="w-3 h-3" />
-                    <span>Add</span>
+                    <span>{t('common.add')}</span>
                   </button>
                 </form>
               )}

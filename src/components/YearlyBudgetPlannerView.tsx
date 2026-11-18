@@ -19,13 +19,13 @@ import {
   LedgerState,
   YearlyPlanItem,
 } from '../types';
+import { useI18n } from '../i18n';
 import {
   formatCurrency,
   formatNumber,
   NetWorthSummaryMetrics,
 } from '../utils/calculations';
 import {
-  ACCOUNT_TYPE_META,
   getDefaultReturnRateForAccount,
 } from '../data/templates';
 
@@ -67,6 +67,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
   onApplyYearlyPlanToMonthlyBudgets,
   onAddCategoryAndPlanItem,
 }) => {
+  const { t, tf, tGroupName, tCategoryName, tAccountName, tAccTypeShort } = useI18n();
   const defaultNextYear = state.settings.activeYear + 1;
   const [planningYear, setPlanningYear] = useState<number>(defaultNextYear);
   const [filterKind, setFilterKind] = useState<'all' | CategoryKind>('all');
@@ -275,18 +276,19 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
 
       for (const item of yearPlanItems) {
         if (item.annualAmount <= 0) continue;
+        const localizedLabel = tCategoryName({ id: item.categoryId, name: item.label });
 
         if (item.kind === 'income' && item.accountId === acc.id) {
           plannedInflows += item.annualAmount;
           linkedItems.push({
-            label: item.label,
+            label: localizedLabel,
             amount: item.annualAmount,
             direction: 'in',
           });
         } else if (item.kind === 'expense' && item.accountId === acc.id) {
           plannedOutflows += item.annualAmount;
           linkedItems.push({
-            label: item.label,
+            label: localizedLabel,
             amount: item.annualAmount,
             direction: 'out',
           });
@@ -298,7 +300,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
           ) {
             plannedOutflows += item.annualAmount;
             linkedItems.push({
-              label: `Transfer → ${item.label}`,
+              label: `→ ${localizedLabel}`,
               amount: item.annualAmount,
               direction: 'out',
             });
@@ -309,7 +311,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
           ) {
             plannedInflows += item.annualAmount;
             linkedItems.push({
-              label: item.label,
+              label: localizedLabel,
               amount: item.annualAmount,
               direction: 'in',
             });
@@ -361,7 +363,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         linkedItems,
       };
     });
-  }, [visibleAccounts, yearPlanItems]);
+  }, [visibleAccounts, yearPlanItems, tCategoryName]);
 
   // Overall Yearly Totals
   const totalPlannedIncome = yearPlanItems
@@ -448,7 +450,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         state.groups.find((g) => g.id === 'home-grp-obligations') ??
         state.groups.find((g) => g.kind === 'expense');
       if (oblGrp) setQuickGroupId(oblGrp.id);
-      setQuickLabel('Tuition Fees');
+      setQuickLabel(t('catItem.home-obl-tuition'));
       setQuickSchedule('annual_lump');
       setQuickAmount('11000');
       setQuickAccountId(defaultLiquidAccountId);
@@ -457,7 +459,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         state.groups.find((g) => g.id === 'home-grp-savings') ??
         state.groups.find((g) => g.kind === 'savings');
       if (savGrp) setQuickGroupId(savGrp.id);
-      setQuickLabel('Global ETF Portfolio Allocation');
+      setQuickLabel(t('yearly.presetEtf').replace(/\s*\(.*$/, ''));
       setQuickSchedule('monthly');
       setQuickAmount('1000');
       setQuickAccountId(defaultLiquidAccountId);
@@ -467,7 +469,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         state.groups.find((g) => g.id === 'home-grp-savings') ??
         state.groups.find((g) => g.kind === 'savings');
       if (savGrp) setQuickGroupId(savGrp.id);
-      setQuickLabel('Pillar 3a / IRA Retirement Contribution');
+      setQuickLabel(t('catItem.home-sav-pillar3a'));
       setQuickSchedule('annual_lump');
       setQuickAmount('7056');
       setQuickAccountId(defaultLiquidAccountId);
@@ -504,6 +506,13 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
     });
   };
 
+  const kindLabel = (kind: CategoryKind) =>
+    kind === 'income'
+      ? t('finance.income')
+      : kind === 'savings'
+        ? t('finance.savings')
+        : t('finance.expenses');
+
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header & Target Year Picker */}
@@ -511,14 +520,14 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         <div>
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl font-normal text-ink tracking-tight">
-              Yearly Budget &amp; Account Forecast Planner
+              {t('yearly.title')}
             </h1>
             <span className="px-2.5 py-0.5 rounded-full bg-indigo/15 text-indigo text-xs font-semibold tabular-nums">
-              Planning {planningYear}
+              {tf('yearly.planningBadge', { year: planningYear })}
             </span>
           </div>
           <p className="text-xs text-ink-2 mt-0.5">
-            Pre-plan next year&apos;s income, major expenses (e.g. tuition fees), and investment allocations mapped directly to your accounts.
+            {t('yearly.subtitle')}
           </p>
         </div>
 
@@ -542,7 +551,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                 }`}
               >
                 {yr}
-                {yr === state.settings.activeYear + 1 ? ' (Next Yr)' : ''}
+                {yr === state.settings.activeYear + 1 ? ` ${t('yearly.nextYrTag')}` : ''}
               </button>
             ))}
           </div>
@@ -551,10 +560,10 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
             type="button"
             onClick={handleSeedFromCurrentBudget}
             className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
-            title="Pre-fill yearly amounts from your current monthly budget × 12 and active recurring items"
+            title={t('yearly.seedTip')}
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo" />
-            <span>Seed from Current Monthly × 12</span>
+            <span>{t('yearly.seedBtn')}</span>
           </button>
 
           <button
@@ -563,10 +572,10 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
               onApplyYearlyPlanToMonthlyBudgets(planningYear, yearPlanItems)
             }
             className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
-            title={`Write planned monthly amounts into all 12 monthly worksheets of ${planningYear}`}
+            title={tf('yearly.applyTip', { year: planningYear })}
           >
             <CopyCheck className="w-3.5 h-3.5" />
-            <span>Apply Plan to {planningYear} Monthly Worksheets</span>
+            <span>{tf('yearly.applyBtn', { year: planningYear })}</span>
           </button>
         </div>
       </div>
@@ -575,55 +584,58 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="p-4 rounded-xl bg-surface border border-line">
           <div className="text-[11px] uppercase tracking-wider text-ink-3">
-            Current Account Standing
+            {t('yearly.kpiStanding')}
           </div>
           <div className="text-lg font-semibold text-ink tabular-nums mt-1">
             {formatCurrency(currentNetWorthStanding, currency)}
           </div>
           <div className="text-[11px] text-ink-2 mt-0.5">
-            Across {visibleAccounts.length} active account(s)
+            {tf('yearly.acrossAccounts', { count: visibleAccounts.length })}
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface border border-line">
           <div className="text-[11px] uppercase tracking-wider text-ink-3">
-            {planningYear} Planned Income
+            {tf('yearly.kpiIncome', { year: planningYear })}
           </div>
           <div className="text-lg font-semibold text-positive tabular-nums mt-1">
             +{formatCurrency(totalPlannedIncome, currency)}
           </div>
           <div className="text-[11px] text-ink-2 mt-0.5 tabular-nums">
-            {formatCurrency(totalPlannedIncome / 12, currency)} / month avg
+            {tf('yearly.perMonthAvg', { amount: formatCurrency(totalPlannedIncome / 12, currency) })}
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface border border-line">
           <div className="text-[11px] uppercase tracking-wider text-ink-3">
-            {planningYear} Planned Outflows
+            {tf('yearly.kpiOutflows', { year: planningYear })}
           </div>
           <div className="text-lg font-semibold text-accent tabular-nums mt-1">
             -{formatCurrency(totalPlannedExpenses, currency)}
           </div>
           <div className="text-[11px] text-ink-2 mt-0.5 tabular-nums">
-            {formatCurrency(totalPlannedExpenses / 12, currency)} / month avg
+            {tf('yearly.perMonthAvg', { amount: formatCurrency(totalPlannedExpenses / 12, currency) })}
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface border border-line">
           <div className="text-[11px] uppercase tracking-wider text-ink-3">
-            Planned Investments &amp; Est. Yield
+            {t('yearly.kpiInvestments')}
           </div>
           <div className="text-lg font-semibold text-indigo tabular-nums mt-1">
             +{formatCurrency(totalPlannedSavingsAndInvestments, currency)}
           </div>
           <div className="text-[11px] text-positive mt-0.5 tabular-nums">
-            +{formatCurrency(totalEstimatedInvestmentGrowth, currency)} est. return in {planningYear}
+            {tf('yearly.estReturnInYear', {
+              amount: formatCurrency(totalEstimatedInvestmentGrowth, currency),
+              year: planningYear,
+            })}
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface border border-line">
           <div className="text-[11px] uppercase tracking-wider text-ink-3">
-            Est. End of {planningYear} Standing
+            {tf('yearly.kpiEstEnd', { year: planningYear })}
           </div>
           <div
             className={`text-lg font-semibold tabular-nums mt-1 ${
@@ -635,7 +647,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
             {formatCurrency(projectedYearEndNetWorth, currency)}
           </div>
           <div className="text-[11px] text-ink-2 mt-0.5 tabular-nums">
-            5-Yr Est.: {formatCurrency(projectedFiveYearNetWorth, currency)}
+            {tf('yearly.fiveYrEst', { amount: formatCurrency(projectedFiveYearNetWorth, currency) })}
           </div>
         </div>
       </div>
@@ -647,18 +659,18 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
             <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
               <Landmark className="w-4 h-4 text-indigo" />
               <span>
-                Current Standing of All Accounts &amp; {planningYear} End-of-Year Estimates
+                {tf('yearly.standingHeading', { year: planningYear })}
               </span>
             </h2>
             <p className="text-xs text-ink-2 mt-0.5">
-              Shows each account&apos;s current balance, planned inflows/outflows assigned to it, expected annual return %, and projected end-of-{planningYear} standing.
+              {tf('yearly.standingDesc', { year: planningYear })}
             </p>
           </div>
 
           {unallocatedCashflow !== 0 && (
             <div className="px-3 py-1 rounded-lg bg-raised border border-line text-xs tabular-nums">
               <span className="text-ink-3 mr-1.5">
-                Unallocated Annual Cashflow:
+                {t('yearly.unallocatedCashflow')}
               </span>
               <span
                 className={`font-semibold ${
@@ -675,7 +687,6 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
           {accountProjections.map((proj) => {
             const acc = proj.account;
-            const meta = ACCOUNT_TYPE_META[acc.type] ?? ACCOUNT_TYPE_META.custom;
             const isShortfall =
               acc.classification !== 'liability' &&
               proj.projectedEndBalance < 0;
@@ -702,10 +713,10 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                       />
                       <div className="min-w-0">
                         <div className="text-xs font-semibold text-ink truncate">
-                          {acc.name}
+                          {tAccountName(acc)}
                         </div>
                         <div className="text-[10px] text-ink-3 truncate">
-                          {acc.customTypeLabel || meta.shortLabel}
+                          {acc.customTypeLabel || tAccTypeShort(acc.type)}
                           {acc.institution ? ` · ${acc.institution}` : ''}
                         </div>
                       </div>
@@ -715,7 +726,6 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                     {acc.classification !== 'liability' && (
                       <div
                         className="flex items-center gap-1 bg-surface border border-line rounded-md px-1.5 py-0.5 shrink-0"
-                        title="Expected annual investment return or interest yield %"
                       >
                         <TrendingUp className="w-3 h-3 text-positive" />
                         <input
@@ -730,7 +740,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                           }
                           className="no-spinner w-9 bg-transparent text-[11px] text-ink font-medium tabular-nums text-right focus:outline-none"
                         />
-                        <span className="text-[10px] text-ink-3">% p.a.</span>
+                        <span className="text-[10px] text-ink-3">{t('yearly.perAnnum')}</span>
                       </div>
                     )}
                   </div>
@@ -738,7 +748,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                   {/* Standing & Flows Breakdown */}
                   <div className="space-y-1 text-xs pt-1 border-t border-line/60">
                     <div className="flex items-center justify-between">
-                      <span className="text-ink-2">Current Standing:</span>
+                      <span className="text-ink-2">{t('yearly.currentStanding')}</span>
                       <span className="font-medium text-ink tabular-nums">
                         {formatCurrency(proj.currentStanding, currency)}
                       </span>
@@ -747,7 +757,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                     {proj.plannedInflows > 0 && (
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="text-ink-3">
-                          Planned Inflows / Contributions:
+                          {t('yearly.plannedInflows')}
                         </span>
                         <span className="text-positive font-medium tabular-nums">
                           +{formatCurrency(proj.plannedInflows, currency)}
@@ -758,7 +768,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                     {proj.plannedOutflows > 0 && (
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="text-ink-3">
-                          Planned Outflows / Expenses:
+                          {t('yearly.plannedOutflows')}
                         </span>
                         <span className="text-accent font-medium tabular-nums">
                           -{formatCurrency(proj.plannedOutflows, currency)}
@@ -769,7 +779,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                     {proj.estimatedReturn > 0 && (
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="text-ink-3">
-                          Est. {planningYear} Growth ({proj.returnRatePct}%):
+                          {tf('yearly.estGrowth', { year: planningYear, rate: proj.returnRatePct })}
                         </span>
                         <span className="text-indigo font-medium tabular-nums">
                           +{formatCurrency(proj.estimatedReturn, currency)}
@@ -796,7 +806,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                       ))}
                       {proj.linkedItems.length > 4 && (
                         <span className="px-1.5 py-0.5 rounded bg-raised text-[10px] text-ink-3">
-                          +{proj.linkedItems.length - 4} more
+                          {tf('yearly.moreCount', { count: proj.linkedItems.length - 4 })}
                         </span>
                       )}
                     </div>
@@ -807,7 +817,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                 <div className="pt-2 border-t border-line/70 flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Est. Dec 31, {planningYear}
+                      {tf('yearly.estDec31', { year: planningYear })}
                     </div>
                     <div
                       className={`text-sm font-semibold tabular-nums ${
@@ -825,12 +835,12 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                   {isShortfall ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-accent/15 text-accent text-[10px] font-medium">
                       <AlertTriangle className="w-3 h-3" />
-                      <span>Shortfall</span>
+                      <span>{t('yearly.shortfall')}</span>
                     </span>
                   ) : isInvestmentOrRetirement &&
                     proj.fiveYearEstimate > proj.projectedEndBalance ? (
                     <div className="text-right">
-                      <div className="text-[10px] text-ink-3">5-Yr Compounded</div>
+                      <div className="text-[10px] text-ink-3">{t('yearly.fiveYrCompounded')}</div>
                       <div className="text-xs font-medium text-indigo tabular-nums">
                         {formatCurrency(proj.fiveYearEstimate, currency)}
                       </div>
@@ -848,23 +858,23 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">
-              Plan a Specific {planningYear} Expense, Tuition Fee, or Investment Allocation
+              {tf('yearly.quickAddHeading', { year: planningYear })}
             </h3>
             <p className="text-[11px] text-ink-2">
-              Add a planned yearly item (like $11,000 in tuition fees) and pick which account it corresponds to.
+              {t('yearly.quickAddDesc')}
             </p>
           </div>
 
           {/* Quick Example Presets */}
           <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span className="text-ink-3">Quick Fill:</span>
+            <span className="text-ink-3">{t('yearly.quickFill')}</span>
             <button
               type="button"
               onClick={() => applyPresetExample('tuition')}
               className="h-6 px-2 rounded-md bg-raised border border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 cursor-pointer"
             >
               <GraduationCap className="w-3 h-3 text-accent" />
-              <span>Tuition Fees (11,000)</span>
+              <span>{t('yearly.presetTuition')}</span>
             </button>
             <button
               type="button"
@@ -872,7 +882,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
               className="h-6 px-2 rounded-md bg-raised border border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 cursor-pointer"
             >
               <TrendingUp className="w-3 h-3 text-indigo" />
-              <span>ETF Investment (1,000/mo)</span>
+              <span>{t('yearly.presetEtf')}</span>
             </button>
             <button
               type="button"
@@ -880,7 +890,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
               className="h-6 px-2 rounded-md bg-raised border border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 cursor-pointer"
             >
               <Shield className="w-3 h-3 text-positive" />
-              <span>Retirement 3a / IRA (7,056)</span>
+              <span>{t('yearly.presetRetirement')}</span>
             </button>
           </div>
         </div>
@@ -891,11 +901,11 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         >
           <div className="flex-[2_1_190px] min-w-[170px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
-              Planned Item / Category Name
+              {t('yearly.itemNameLabel')}
             </label>
             <input
               type="text"
-              placeholder="e.g. Tuition Fees, ETF Allocation, Roof Repair"
+              placeholder={t('yearly.itemNamePlaceholder')}
               value={quickLabel}
               onChange={(e) => setQuickLabel(e.target.value)}
               required
@@ -905,7 +915,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
 
           <div className="flex-[1_1_160px] min-w-[150px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
-              Budget Group
+              {t('yearly.budgetGroupLabel')}
             </label>
             <select
               value={quickGroupId}
@@ -916,7 +926,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                 .filter((g) => modeFilter(g.mode))
                 .map((grp) => (
                   <option key={grp.id} value={grp.id}>
-                    {grp.name} ({grp.kind})
+                    {tGroupName(grp)} ({kindLabel(grp.kind)})
                   </option>
                 ))}
             </select>
@@ -924,7 +934,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
 
           <div className="flex-[1_1_125px] min-w-[115px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
-              Schedule
+              {t('yearly.scheduleLabel')}
             </label>
             <select
               value={quickSchedule}
@@ -933,16 +943,16 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
               }
               className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="annual_lump">Annual Total ({planningYear})</option>
-              <option value="monthly">Monthly × 12</option>
+              <option value="annual_lump">{tf('yearly.annualTotalOpt', { year: planningYear })}</option>
+              <option value="monthly">{t('yearly.monthly12Opt')}</option>
             </select>
           </div>
 
           <div className="flex-[1_1_115px] min-w-[105px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
               {quickSchedule === 'monthly'
-                ? `Monthly (${currency})`
-                : `Annual (${currency})`}
+                ? tf('yearly.monthlyCurrencyLabel', { currency })
+                : tf('yearly.annualCurrencyLabel', { currency })}
             </label>
             <input
               type="number"
@@ -958,20 +968,20 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
           <div className="flex-[2_1_200px] min-w-[180px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
               {selectedQuickGroup?.kind === 'income'
-                ? 'Deposit Into Account'
+                ? t('yearly.depositAccount')
                 : selectedQuickGroup?.kind === 'savings'
-                  ? 'Source Bank Account (From)'
-                  : 'Corresponds to Account (Paid From)'}
+                  ? t('yearly.sourceAccount')
+                  : t('yearly.correspondsAccount')}
             </label>
             <select
               value={quickAccountId}
               onChange={(e) => setQuickAccountId(e.target.value)}
               className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="">Unassigned Account</option>
+              <option value="">{t('yearly.unassignedAccount')}</option>
               {visibleAccounts.map((ar) => (
                 <option key={ar.account.id} value={ar.account.id}>
-                  {ar.account.name} ({formatCurrency(ar.liveBalance, currency)})
+                  {tAccountName(ar.account)} ({formatCurrency(ar.liveBalance, currency)})
                 </option>
               ))}
             </select>
@@ -980,18 +990,18 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
           {selectedQuickGroup?.kind === 'savings' && (
             <div className="flex-[2_1_200px] min-w-[180px]">
               <label className="block text-[11px] text-indigo mb-1 truncate font-medium">
-                Destination Investment / Savings Account (To)
+                {t('yearly.destAccount')}
               </label>
               <select
                 value={quickDestAccountId}
                 onChange={(e) => setQuickDestAccountId(e.target.value)}
                 className="w-full h-8 px-2 rounded-lg bg-raised border border-indigo/40 text-xs text-ink focus:outline-none"
               >
-                <option value="">Select destination account…</option>
+                <option value="">{t('yearly.selectDest')}</option>
                 {visibleAccounts.map((ar) => (
                   <option key={ar.account.id} value={ar.account.id}>
-                    {ar.account.name} (
-                    {getDefaultReturnRateForAccount(ar.account)}% p.a.)
+                    {tAccountName(ar.account)} (
+                    {getDefaultReturnRateForAccount(ar.account)}{t('yearly.perAnnum')})
                   </option>
                 ))}
               </select>
@@ -1003,7 +1013,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
             className="h-8 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add to {planningYear} Plan</span>
+            <span>{tf('yearly.addToPlanBtn', { year: planningYear })}</span>
           </button>
         </form>
       </section>
@@ -1014,10 +1024,10 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
           <div className="flex items-center gap-1.5">
             {(
               [
-                ['all', 'All Categories'],
-                ['income', 'Income'],
-                ['expense', 'Expenses & Obligations'],
-                ['savings', 'Savings & Investments'],
+                ['all', t('yearly.filterAll')],
+                ['income', t('finance.income')],
+                ['expense', t('yearly.filterExpenses')],
+                ['savings', t('yearly.filterSavings')],
               ] as const
             ).map(([k, label]) => (
               <button
@@ -1042,7 +1052,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
               onChange={(e) => setHideUnplannedRows(e.target.checked)}
               className="rounded border-line"
             />
-            <span>Show only categories with planned {planningYear} amounts</span>
+            <span>{tf('yearly.showPlannedOnly', { year: planningYear })}</span>
           </label>
         </div>
 
@@ -1078,22 +1088,22 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                       style={{ backgroundColor: grp.color }}
                     />
                     <span className="font-semibold uppercase tracking-wider text-ink">
-                      {grp.name}
+                      {tGroupName(grp)}
                     </span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-line text-ink-3 uppercase">
-                      {grp.kind}
+                      {kindLabel(grp.kind)}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-4 tabular-nums">
                     <span className="text-ink-2">
-                      Monthly Avg:{' '}
+                      {t('yearly.monthlyAvg')}{' '}
                       <strong className="text-ink">
                         {formatCurrency(groupAnnualTotal / 12, currency)}
                       </strong>
                     </span>
                     <span className="text-ink-2">
-                      {planningYear} Total:{' '}
+                      {tf('yearly.yearTotal', { year: planningYear })}{' '}
                       <strong className="text-ink">
                         {formatCurrency(groupAnnualTotal, currency)}
                       </strong>
@@ -1145,11 +1155,11 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                         <div className="min-w-[180px] flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium text-ink">
-                              {cat.name}
+                              {tCategoryName(cat)}
                             </span>
                             {cat.isRecurring && (
                               <span className="px-1.5 py-0.2 rounded bg-indigo/10 text-indigo text-[10px]">
-                                Recurring
+                                {t('yearly.recurringBadge')}
                               </span>
                             )}
                             {cat.kind === 'savings' &&
@@ -1158,7 +1168,12 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-positive/10 text-positive text-[10px] font-medium tabular-nums">
                                   <TrendingUp className="w-3 h-3" />
                                   <span>
-                                    Est. +{formatCurrency(yr1Gain, currency)} yield in {planningYear} · 5-Yr Value: {formatCurrency(yr5Value, currency)} ({destReturnRate}% p.a.)
+                                    {tf('yearly.yieldBadge', {
+                                      gain: formatCurrency(yr1Gain, currency),
+                                      year: planningYear,
+                                      val: formatCurrency(yr5Value, currency),
+                                      rate: destReturnRate,
+                                    })}
                                   </span>
                                 </span>
                               )}
@@ -1178,15 +1193,15 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                               })
                             }
                             className="h-7 px-2 rounded bg-raised border border-line text-[11px] text-ink-2 focus:text-ink focus:outline-none"
-                            title="Planning schedule"
+                            title={t('yearly.scheduleLabel')}
                           >
-                            <option value="monthly">Monthly × 12</option>
-                            <option value="annual_lump">Annual Total</option>
+                            <option value="monthly">{t('yearly.monthly12Opt')}</option>
+                            <option value="annual_lump">{t('yearly.annualTotalSimple')}</option>
                           </select>
 
                           {/* Monthly Amount Input */}
                           <div className="inline-flex items-center gap-1">
-                            <span className="text-[10px] text-ink-3">Mo:</span>
+                            <span className="text-[10px] text-ink-3">{t('yearly.moShort')}</span>
                             <input
                               type="number"
                               step="10"
@@ -1204,14 +1219,13 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                                 });
                               }}
                               className="no-spinner w-20 h-7 px-2 rounded bg-raised border border-line text-right tabular-nums text-ink-2 focus:text-ink focus:outline-none"
-                              title="Planned monthly equivalent"
                             />
                           </div>
 
                           {/* Annual Amount Input */}
                           <div className="inline-flex items-center gap-1">
                             <span className="text-[10px] text-ink-3 font-medium">
-                              Year ({currency}):
+                              {tf('yearly.yearCurrency', { currency })}
                             </span>
                             <input
                               type="number"
@@ -1229,7 +1243,6 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                                 });
                               }}
                               className="no-spinner w-24 h-7 px-2 rounded bg-surface border border-line text-right tabular-nums font-semibold text-ink focus:border-ink focus:outline-none"
-                              title={`Total planned amount for ${planningYear}`}
                             />
                           </div>
 
@@ -1242,24 +1255,17 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                               })
                             }
                             className="h-7 px-2 rounded bg-raised border border-line text-[11px] text-ink max-w-[190px] focus:outline-none"
-                            title={
-                              cat.kind === 'income'
-                                ? 'Account where this planned income is deposited'
-                                : cat.kind === 'savings'
-                                  ? 'Source bank account funding this contribution'
-                                  : 'Account this planned expense corresponds to'
-                            }
                           >
                             <option value="">
                               {cat.kind === 'income'
-                                ? 'Deposit Account…'
+                                ? t('yearly.depositAccountPick')
                                 : cat.kind === 'savings'
-                                  ? 'From Account…'
-                                  : 'Corresponds to Account…'}
+                                  ? t('yearly.fromAccountPick')
+                                  : t('yearly.correspondsAccountPick')}
                             </option>
                             {visibleAccounts.map((ar) => (
                               <option key={ar.account.id} value={ar.account.id}>
-                                {ar.account.name} (
+                                {tAccountName(ar.account)} (
                                 {formatNumber(ar.liveBalance)})
                               </option>
                             ))}
@@ -1278,19 +1284,18 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                                   })
                                 }
                                 className="h-7 px-2 rounded bg-indigo/10 border border-indigo/30 text-[11px] text-ink max-w-[190px] focus:outline-none"
-                                title="Destination investment, retirement, or savings account where the money goes"
                               >
                                 <option value="">
-                                  Into Investment / Savings…
+                                  {t('yearly.intoInvestmentPick')}
                                 </option>
                                 {visibleAccounts.map((ar) => (
                                   <option
                                     key={ar.account.id}
                                     value={ar.account.id}
                                   >
-                                    {ar.account.name} (
+                                    {tAccountName(ar.account)} (
                                     {getDefaultReturnRateForAccount(ar.account)}
-                                    % p.a.)
+                                    {t('yearly.perAnnum')})
                                   </option>
                                 ))}
                               </select>
@@ -1306,7 +1311,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                                 )
                               }
                               className="p-1 text-ink-3 hover:text-accent cursor-pointer"
-                              title="Clear planned amount"
+                              title={t('yearly.clearPlanTip')}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

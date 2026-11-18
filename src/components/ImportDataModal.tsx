@@ -69,7 +69,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   onCommitImport,
   isTauri,
 }) => {
-  const { t } = useI18n();
+  const { t, tf, tGroupName, tCategoryName, tAccountName, tAccClass } = useI18n();
   const [importKind, setImportKind] = useState<ImportKind>('budget_sheet');
   const [targetMode, setTargetMode] = useState<LedgerMode>(defaultMode);
   const [passphrase, setPassphrase] = useState('');
@@ -300,8 +300,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     {
       id: 'budget_sheet',
       title: t('import.budgetSheet'),
-      subtitle:
-        'Import category groups, categories, budgeted amounts, and actuals from a 2-column or flat spreadsheet.',
+      subtitle: t('import.budgetSheetDesc'),
       formats: '.xlsx, .xls, .csv',
       icon: FileSpreadsheet,
       accent: 'text-positive',
@@ -309,8 +308,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     {
       id: 'transactions',
       title: t('import.transactions'),
-      subtitle:
-        'Import itemized income & expense entries (Date, Description, Amount, Category, Client, Invoice, VAT %).',
+      subtitle: t('import.transactionsDesc'),
       formats: '.csv, .xlsx, .xls',
       icon: ReceiptText,
       accent: 'text-indigo',
@@ -318,8 +316,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     {
       id: 'database_backup',
       title: t('import.backup'),
-      subtitle:
-        'Restore a full AES-256-GCM encrypted Koban SQLite database (.db) or JSON backup snapshot.',
+      subtitle: t('import.backupDesc'),
       formats: '.db, .sqlite, .json',
       icon: Database,
       accent: 'text-accent',
@@ -366,8 +363,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               </div>
               <p className="text-xs text-ink-2">
                 {previewData
-                  ? `Review the parsed data from "${previewData.fileName}" before applying changes to your ledger`
-                  : 'Import spreadsheets, transaction CSVs, or encrypted database backups'}
+                  ? tf('import.subReview', { file: previewData.fileName })
+                  : t('import.subSelect')}
               </p>
             </div>
           </div>
@@ -386,7 +383,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             {/* 1. Select Import Type */}
             <div className="space-y-2">
               <label className="block text-xs uppercase tracking-[0.12em] text-ink-3 font-medium">
-                1. Select What to Import
+                {t('import.step1Heading')}
               </label>
               <div className="space-y-2">
                 {cards.map((c) => {
@@ -435,10 +432,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               <div className="flex items-center justify-between p-3.5 rounded-xl bg-app border border-line">
                 <div>
                   <div className="text-xs font-medium text-ink">
-                    Target Workspace & Month ({monthKey})
+                    {tf('import.targetWorkspace', { month: monthKey })}
                   </div>
                   <p className="text-[11px] text-ink-3">
-                    Choose which ledger workspace receives the imported items
+                    {t('import.targetWorkspaceDesc')}
                   </p>
                 </div>
                 <div className="flex items-center bg-raised p-0.5 rounded-lg border border-line text-xs">
@@ -451,7 +448,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                         : 'text-ink-2 hover:text-ink'
                     }`}
                   >
-                    Home Budget
+                    {t('onboarding.home')}
                   </button>
                   <button
                     type="button"
@@ -462,7 +459,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                         : 'text-ink-2 hover:text-ink'
                     }`}
                   >
-                    Freelancer
+                    {t('workspace.freelancer')}
                   </button>
                 </div>
               </div>
@@ -470,16 +467,14 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               <div className="p-3.5 rounded-xl bg-app border border-line space-y-2">
                 <div className="flex items-center gap-2 text-xs font-medium text-ink">
                   <Lock className="w-3.5 h-3.5 text-positive" />
-                  <span>Optional Vault Passphrase</span>
+                  <span>{t('import.optionalPassphrase')}</span>
                 </div>
                 <p className="text-[11px] text-ink-2">
-                  Leave empty if the backup uses Koban&apos;s default
-                  AES-256-GCM vault key, or enter your custom passphrase if you
-                  configured one.
+                  {t('import.optionalPassphraseDesc')}
                 </p>
                 <input
                   type="password"
-                  placeholder="Optional custom vault passphrase…"
+                  placeholder={t('import.optionalPassphrasePlaceholder')}
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.target.value)}
                   className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
@@ -493,13 +488,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 <Eye className="w-4 h-4 text-indigo shrink-0 mt-0.5" />
                 <div>
                   <div className="text-xs font-medium text-ink">
-                    Preview data and require confirmation before completing
-                    import
+                    {t('import.previewToggleTitle')}
                   </div>
                   <p className="text-[11px] text-ink-3 mt-0.5">
-                    Inspect all parsed rows and totals before committing to the
-                    ledger. You can also change this anytime in Settings &
-                    Behavior.
+                    {t('import.previewToggleDesc')}
                   </p>
                 </div>
               </div>
@@ -518,7 +510,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 onClick={handleCloseAll}
                 className="h-9 px-4 rounded-lg text-xs text-ink-2 hover:text-ink hover:bg-raised cursor-pointer"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -533,10 +525,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 )}
                 <span>
                   {isBusy
-                    ? 'Reading File…'
+                    ? t('import.readingFile')
                     : confirmAndPreviewBeforeImport
-                      ? 'Select File & Preview Import…'
-                      : 'Select File & Import Immediately…'}
+                      ? t('import.selectFile')
+                      : t('import.selectImmediate')}
                 </span>
               </button>
             </div>
@@ -564,9 +556,11 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   {previewData.kind !== 'database_backup' && (
                     <span className="text-ink-2">
                       {' '}
-                      • Target:{' '}
-                      <strong className="text-ink capitalize">
-                        {previewData.targetMode}
+                      •{' '}
+                      <strong className="text-ink">
+                        {previewData.targetMode === 'home'
+                          ? t('workspace.home')
+                          : t('workspace.freelancer')}
                       </strong>{' '}
                       ({monthKey})
                     </span>
@@ -583,8 +577,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                     className="rounded border-line"
                   />
                   <span>
-                    Show non-zero rows only ({budgetMetrics.nonZeroCount} of{' '}
-                    {previewData.budgetRows?.length ?? 0})
+                    {tf('import.showNonZeroOnly', {
+                      active: budgetMetrics.nonZeroCount,
+                      total: previewData.budgetRows?.length ?? 0,
+                    })}
                   </span>
                 </label>
               )}
@@ -596,46 +592,50 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Categories Parsed
+                      {t('import.categoriesParsed')}
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
-                      {previewData.budgetRows?.length ?? 0} rows
+                      {tf('import.rowsCount', {
+                        count: previewData.budgetRows?.length ?? 0,
+                      })}
                     </div>
                     <div className="text-[11px] text-ink-2 mt-0.5">
-                      {budgetMetrics.newCount} new •{' '}
-                      {budgetMetrics.nonZeroCount} active
+                      {tf('import.newActiveCounts', {
+                        new: budgetMetrics.newCount,
+                        active: budgetMetrics.nonZeroCount,
+                      })}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Income (Budget / Actual)
+                      {t('import.incomeBudgetActual')}
                     </div>
                     <div className="text-sm font-semibold text-positive mt-0.5 tabular-nums">
                       {formatCurrency(budgetMetrics.incomeBudget, currency)}
                     </div>
                     <div className="text-[11px] text-ink-2 mt-0.5 tabular-nums">
-                      Actual:{' '}
+                      {t('finance.actual')}:{' '}
                       {formatCurrency(budgetMetrics.incomeActual, currency)}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Outflows (Budget / Actual)
+                      {t('import.outflowsBudgetActual')}
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
                       {formatCurrency(budgetMetrics.outflowBudget, currency)}
                     </div>
                     <div className="text-[11px] text-ink-2 mt-0.5 tabular-nums">
-                      Actual:{' '}
+                      {t('finance.actual')}:{' '}
                       {formatCurrency(budgetMetrics.outflowActual, currency)}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Net Cashflow Preview
+                      {t('import.netCashflowPreview')}
                     </div>
                     <div
                       className={`text-sm font-semibold mt-0.5 tabular-nums ${
@@ -647,8 +647,9 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       {formatCurrency(budgetMetrics.netActual, currency)}
                     </div>
                     <div className="text-[11px] text-ink-2 mt-0.5 tabular-nums">
-                      Planned Net:{' '}
-                      {formatCurrency(budgetMetrics.netBudget, currency)}
+                      {tf('reports.plannedNet', {
+                        amount: formatCurrency(budgetMetrics.netBudget, currency),
+                      })}
                     </div>
                   </div>
                 </div>
@@ -659,14 +660,14 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       <thead className="sticky top-0 bg-raised border-b border-line text-[10px] uppercase tracking-wider text-ink-3">
                         <tr>
                           <th className="py-2 px-2.5 w-8 text-center">✓</th>
-                          <th className="py-2 px-3">Group</th>
-                          <th className="py-2 px-3">Category</th>
-                          <th className="py-2 px-2.5">Action</th>
+                          <th className="py-2 px-3">{t('import.colGroup')}</th>
+                          <th className="py-2 px-3">{t('finance.category')}</th>
+                          <th className="py-2 px-2.5">{t('import.colAction')}</th>
                           <th className="py-2 px-3 text-right">
-                            Budget ({currency})
+                            {t('finance.budget')} ({currency})
                           </th>
                           <th className="py-2 px-3 text-right">
-                            Actual ({currency})
+                            {t('finance.actual')} ({currency})
                           </th>
                         </tr>
                       </thead>
@@ -704,19 +705,19 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                                 />
                               </td>
                               <td className="py-1.5 px-3 text-[11px] text-ink-2 font-medium">
-                                {row.groupName}
+                                {tGroupName(row.groupName)}
                               </td>
                               <td className="py-1.5 px-3 font-medium text-ink">
-                                {row.categoryName}
+                                {tCategoryName({ id: row.categoryId, name: row.categoryName })}
                               </td>
                               <td className="py-1.5 px-2.5">
                                 {row.isNewCategory ? (
                                   <span className="px-1.5 py-0.5 rounded bg-positive/12 text-positive text-[10px] font-medium">
-                                    New
+                                    {t('import.badgeNew')}
                                   </span>
                                 ) : (
                                   <span className="px-1.5 py-0.5 rounded bg-raised text-ink-2 text-[10px]">
-                                    Update
+                                    {t('import.badgeUpdate')}
                                   </span>
                                 )}
                               </td>
@@ -770,16 +771,18 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Entries to Import
+                      {t('import.entriesToImport')}
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
-                      {previewData.transactionRows?.length ?? 0} transactions
+                      {tf('import.txCountLabel', {
+                        count: previewData.transactionRows?.length ?? 0,
+                      })}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Income ({txMetrics.incomeCount})
+                      {t('finance.income')} ({txMetrics.incomeCount})
                     </div>
                     <div className="text-sm font-semibold text-positive mt-0.5 tabular-nums">
                       {formatCurrency(txMetrics.incomeTotal, currency)}
@@ -788,7 +791,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Expenses ({txMetrics.expenseCount})
+                      {t('finance.expenses')} ({txMetrics.expenseCount})
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
                       {formatCurrency(txMetrics.expenseTotal, currency)}
@@ -797,7 +800,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Net Transaction Total
+                      {t('import.netTxTotal')}
                     </div>
                     <div
                       className={`text-sm font-semibold mt-0.5 tabular-nums ${
@@ -817,12 +820,12 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                       <thead className="sticky top-0 bg-raised border-b border-line text-[10px] uppercase tracking-wider text-ink-3">
                         <tr>
                           <th className="py-2 px-2.5 w-8 text-center">✓</th>
-                          <th className="py-2 px-3">Date</th>
-                          <th className="py-2 px-2.5">Type</th>
-                          <th className="py-2 px-3">Category</th>
-                          <th className="py-2 px-3">Description</th>
+                          <th className="py-2 px-3">{t('finance.date')}</th>
+                          <th className="py-2 px-2.5">{t('import.colType')}</th>
+                          <th className="py-2 px-3">{t('finance.category')}</th>
+                          <th className="py-2 px-3">{t('finance.description')}</th>
                           <th className="py-2 px-3 text-right">
-                            Amount ({currency})
+                            {t('finance.amount')} ({currency})
                           </th>
                         </tr>
                       </thead>
@@ -861,11 +864,13 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                                     : 'bg-raised text-ink-2'
                                 }`}
                               >
-                                {tx.type}
+                                {tx.type === 'income'
+                                  ? t('tx.filterIncome')
+                                  : t('tx.filterExpense')}
                               </span>
                             </td>
                             <td className="py-1.5 px-3 text-ink-2">
-                              {tx.categoryName}
+                              {tCategoryName(tx.categoryName)}
                             </td>
                             <td className="py-1.5 px-3 font-medium text-ink">
                               {tx.description}
@@ -902,48 +907,47 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   <AlertTriangle className="w-4 h-4 text-accent shrink-0 mt-0.5" />
                   <div>
                     <span className="font-semibold">
-                      Confirmation Required:
+                      {t('import.backupConfirmTitle')}
                     </span>{' '}
-                    Restoring this backup snapshot will replace your current
-                    active ledger with the contents of{' '}
-                    <strong>{previewData.fileName}</strong>.
+                    {tf('import.backupConfirmBody', {
+                      file: previewData.fileName,
+                    })}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Groups & Categories
+                      {t('import.groupsCategories')}
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
-                      {previewData.proposedState.groups?.length ?? 0} groups •{' '}
-                      {previewData.proposedState.categories?.length ?? 0} cats
+                      {previewData.proposedState.groups?.length ?? 0} •{' '}
+                      {previewData.proposedState.categories?.length ?? 0}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Financial Accounts
+                      {t('import.financialAccounts')}
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
-                      {previewData.proposedState.accounts?.length ?? 0} accounts
+                      {previewData.proposedState.accounts?.length ?? 0}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Transactions & Rules
+                      {t('import.transactionsRules')}
                     </div>
                     <div className="text-sm font-semibold text-ink mt-0.5 tabular-nums">
-                      {previewData.proposedState.transactions?.length ?? 0} txs
-                      • {previewData.proposedState.recurringRules?.length ?? 0}{' '}
-                      rules
+                      {previewData.proposedState.transactions?.length ?? 0} •{' '}
+                      {previewData.proposedState.recurringRules?.length ?? 0}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-app border border-line">
                     <div className="text-[10px] uppercase tracking-wider text-ink-3">
-                      Backup Currency & Period
+                      {t('import.backupCurrencyPeriod')}
                     </div>
                     <div className="text-sm font-semibold text-positive mt-0.5">
                       {previewData.proposedState.settings?.currency ?? 'CHF'} •{' '}
@@ -958,7 +962,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 {(previewData.proposedState.accounts?.length ?? 0) > 0 && (
                   <div className="border border-line rounded-xl overflow-hidden bg-app">
                     <div className="px-3 py-2 bg-raised border-b border-line text-[10px] uppercase tracking-wider text-ink-3 font-medium">
-                      Accounts Included in Backup Snapshot
+                      {t('import.accountsIncluded')}
                     </div>
                     <div className="max-h-48 overflow-y-auto divide-y divide-line/60">
                       {(previewData.proposedState.accounts ?? []).map((acc) => (
@@ -968,10 +972,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                         >
                           <div>
                             <span className="font-medium text-ink">
-                              {acc.name}
+                              {tAccountName(acc)}
                             </span>
-                            <span className="text-ink-3 ml-2 text-[11px] capitalize">
-                              ({acc.classification})
+                            <span className="text-ink-3 ml-2 text-[11px]">
+                              ({tAccClass(acc.classification)})
                             </span>
                           </div>
                           <span className="font-semibold tabular-nums text-ink">
@@ -1023,13 +1027,13 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   <CheckCircle2 className="w-4 h-4" />
                   <span>
                     {isBusy
-                      ? 'Completing Import…'
-                      : `Confirm & Complete Import (${
+                      ? t('import.completing')
+                      : `${t('import.confirm')} (${
                           previewData.kind === 'transactions'
-                            ? `${txMetrics.selectedCount} transactions`
+                            ? txMetrics.selectedCount
                             : previewData.kind === 'budget_sheet'
-                              ? `${budgetMetrics.selectedCount} categories`
-                              : `${previewData.importedCount} records`
+                              ? budgetMetrics.selectedCount
+                              : previewData.importedCount
                         })`}
                   </span>
                 </button>
