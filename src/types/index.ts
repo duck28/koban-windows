@@ -201,6 +201,8 @@ export interface AppSettings {
   confirmAndPreviewBeforeImport?: boolean;
   /** UI language code (e.g. 'en', 'de', 'hu', 'ja') */
   language?: string;
+  /** Automatically check GitHub Releases for app updates on startup */
+  autoCheckUpdates?: boolean;
   /** WebDAV Cloud Sync Configuration (Nextcloud, ownCloud, mailbox.org, NAS) */
   webdav?: WebDavConfig;
 }

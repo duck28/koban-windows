@@ -976,6 +976,7 @@ export function createInitialLedgerState(
       confirmBeforeDelete: true,
       defaultHideZeroRows: false,
       confirmAndPreviewBeforeImport: true,
+      autoCheckUpdates: true,
     },
     groups: [...homeData.groups, ...freelancerData.groups],
     categories: [...homeData.categories, ...freelancerData.categories],

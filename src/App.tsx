@@ -86,7 +86,12 @@ import {
   WebDavOpenVaultRequest,
 } from './components/WebDavOpenVaultModal';
 import { useWebDavSync, WebDavSyncContext } from './hooks/useWebDavSync';
-import { CheckCircle2, ExternalLink, X } from 'lucide-react';
+import {
+  UpdateCheckResult,
+  checkForAppUpdates,
+  openExternalUrl,
+} from './utils/updater';
+import { CheckCircle2, Download, ExternalLink, X } from 'lucide-react';
 import { useI18n } from './i18n';
 import './App.css';
 
@@ -165,7 +170,12 @@ export function App() {
     createInitialLedgerState('both', 'CHF', '', false)
   );
   const [isLoaded, setIsLoaded] = useState(false);
-  const { setLanguage } = useI18n();
+  const { t, setLanguage } = useI18n();
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
+  const didStartupUpdateCheckRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<ViewTab>('worksheet');
@@ -192,6 +202,46 @@ export function App() {
       5000
     );
   };
+
+  const handleCheckForUpdates = async (silent = false) => {
+    setIsCheckingUpdate(true);
+    setUpdateCheckError(null);
+    try {
+      const result = await checkForAppUpdates();
+      setUpdateInfo(result);
+      if (result.update_available) {
+        setUpdateBannerDismissed(false);
+        if (!silent) {
+          showNotification(
+            t('settings.updates.available')
+              .replace('{latest}', result.latest_version)
+              .replace('{current}', result.current_version)
+          );
+        }
+      } else if (!silent) {
+        showNotification(
+          t('settings.updates.upToDate').replace('{version}', result.current_version)
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUpdateCheckError(msg);
+      if (!silent) {
+        showNotification(t('settings.updates.error').replace('{error}', msg));
+      }
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoaded || !state.settings.setupCompleted) return;
+    if (didStartupUpdateCheckRef.current) return;
+    if ((state.settings.autoCheckUpdates ?? true) === false) return;
+    didStartupUpdateCheckRef.current = true;
+    void handleCheckForUpdates(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, state.settings.setupCompleted, state.settings.autoCheckUpdates]);
 
   // ================= PERSISTENCE & WEBDAV SYNC ENGINE =================
   const latestStateRef = useRef(state);
@@ -640,6 +690,8 @@ export function App() {
       fresh.settings.monthCopyScope = opts.monthCopyScope;
       fresh.settings.autoPromptCopyOnEmptyMonth =
         opts.autoPromptCopyOnEmptyMonth;
+      fresh.settings.language = state.settings.language;
+      fresh.settings.autoCheckUpdates = state.settings.autoCheckUpdates ?? true;
       nextState = fresh;
       setState(fresh);
     } else {
@@ -1954,6 +2006,46 @@ export function App() {
         isSaving={isSaving}
       />
 
+      {updateInfo?.update_available && !updateBannerDismissed && (
+        <div className="px-4 py-2 bg-positive/12 border-b border-positive/30 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-ink">
+            <Download className="w-3.5 h-3.5 text-positive shrink-0" />
+            <span className="font-medium">
+              {t('settings.updates.available')
+                .replace('{latest}', updateInfo.latest_version)
+                .replace('{current}', updateInfo.current_version)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                void openExternalUrl(
+                  updateInfo.download_url || updateInfo.release_url
+                )
+              }
+              className="h-7 px-3 inline-flex items-center gap-1.5 rounded-md bg-positive text-white text-[11px] font-medium hover:opacity-90 cursor-pointer"
+            >
+              <Download className="w-3 h-3" />
+              <span>
+                {t('settings.updates.download').replace(
+                  '{version}',
+                  updateInfo.latest_version
+                )}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setUpdateBannerDismissed(true)}
+              className="p-1 rounded text-ink-3 hover:text-ink hover:bg-raised cursor-pointer"
+              title={t('common.close')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <Sidebar
@@ -2144,6 +2236,10 @@ export function App() {
               onOpenSetupWizard={() => setShowSetupModal(true)}
               onOpenBackupsTab={() => setActiveTab('backups')}
               onReloadLedgerState={handleReloadLedgerState}
+              updateInfo={updateInfo}
+              isCheckingUpdate={isCheckingUpdate}
+              updateCheckError={updateCheckError}
+              onCheckForUpdates={() => void handleCheckForUpdates(false)}
             />
           )}
         </main>
@@ -2155,6 +2251,7 @@ export function App() {
         currentSettings={state.settings}
         existingAccounts={state.accounts ?? []}
         authConfig={authConfig}
+        hasCustomDbPassphrase={hasCustomDbPassphrase}
         onUpdateAuthConfig={handleUpdateAuthConfig}
         onUpdateLanguage={(code) => updateSettings({ language: code })}
         onCompleteSetup={handleCompleteSetup}

@@ -22,6 +22,7 @@ import {
   Fingerprint,
   CheckCircle2,
   Cloud,
+  AlertTriangle,
   X,
 } from 'lucide-react';
 import {
@@ -58,6 +59,7 @@ interface OnboardingModalProps {
   currentSettings: AppSettings;
   existingAccounts: FinancialAccount[];
   authConfig: AuthConfig;
+  hasCustomDbPassphrase?: boolean;
   onUpdateAuthConfig: (next: AuthConfig) => void;
   onUpdateLanguage?: (code: string) => void;
   onCompleteSetup: (options: {
@@ -92,6 +94,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   currentSettings,
   existingAccounts,
   authConfig,
+  hasCustomDbPassphrase = false,
   onUpdateAuthConfig,
   onUpdateLanguage,
   onCompleteSetup,
@@ -151,6 +154,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     currentSettings.backupDir ? currentSettings.autoBackup : true
   );
   const [vaultPassphrase, setVaultPassphrase] = useState('');
+  const [vaultPassphraseConfirm, setVaultPassphraseConfirm] = useState('');
   const [userDisplayName, setUserDisplayName] = useState(
     authConfig.userDisplayName || 'Koban Owner'
   );
@@ -326,7 +330,38 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     }
   };
 
+  const requiresCustomPassphrase = !hasCustomDbPassphrase;
+  const trimmedPassphrase = vaultPassphrase.trim();
+  const trimmedPassphraseConfirm = vaultPassphraseConfirm.trim();
+
+  const passphraseError: string | null = (() => {
+    if (requiresCustomPassphrase) {
+      if (!trimmedPassphrase) {
+        return t('onboarding.s4.errRequired');
+      }
+      if (trimmedPassphrase.length < 4) {
+        return t('onboarding.s4.errMinLength');
+      }
+      if (trimmedPassphrase !== trimmedPassphraseConfirm) {
+        return t('onboarding.s4.errMismatch');
+      }
+      return null;
+    }
+    if (trimmedPassphrase || trimmedPassphraseConfirm) {
+      if (trimmedPassphrase.length < 4) {
+        return t('onboarding.s4.errMinLength');
+      }
+      if (trimmedPassphrase !== trimmedPassphraseConfirm) {
+        return t('onboarding.s4.errMismatch');
+      }
+    }
+    return null;
+  })();
+
+  const isPassphraseValid = passphraseError === null;
+
   const handleEnrollPasskeyInOnboarding = async () => {
+    if (!isPassphraseValid) return;
     setIsEnrollingPasskey(true);
     setPasskeyStatusMsg(null);
     try {
@@ -357,6 +392,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   };
 
   const handleFinish = async () => {
+    if (!isPassphraseValid) return;
     let nextAuth: AuthConfig = {
       ...authConfig,
       enabled:
@@ -458,24 +494,21 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     {
       id: 'home',
       title: t('onboarding.home'),
-      subtitle:
-        'Personal & household monthly budget, daily living, subscriptions, obligations, and savings.',
+      subtitle: t('onboarding.home.desc'),
       icon: Home,
       accentColor: 'text-accent',
     },
     {
       id: 'freelancer',
       title: t('onboarding.freelancer'),
-      subtitle:
-        'Client revenue, tax-deductible business expenses, VAT reconciliation, and tax reserves.',
+      subtitle: t('onboarding.freelancer.desc'),
       icon: Briefcase,
       accentColor: 'text-indigo',
     },
     {
       id: 'both',
       title: t('onboarding.both'),
-      subtitle:
-        'Dedicated Home and Freelancer workspaces with instant top-bar switching and combined cashflow.',
+      subtitle: t('onboarding.both.desc'),
       icon: Layers,
       accentColor: 'text-positive',
     },
@@ -500,7 +533,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   {t('onboarding.title')}
                 </h1>
                 <span className="px-2 py-0.5 rounded-full bg-raised border border-line text-[10px] font-medium text-ink-2">
-                  Step {step} of 4
+                  {t('onboarding.stepOf4').replace('{step}', String(step))}
                 </span>
               </div>
               <p className="text-xs text-ink-2">
@@ -525,10 +558,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 type="button"
                 onClick={onOpenWebDavVault}
                 className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/70 transition-colors cursor-pointer"
-                title="Download an existing Koban vault from your WebDAV server"
+                title={t('onboarding.openWebDav')}
               >
                 <Cloud className="w-3.5 h-3.5 text-indigo" />
-                <span>Open Vault from WebDAV…</span>
+                <span>{t('onboarding.openWebDav')}</span>
               </button>
             )}
 
@@ -536,7 +569,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               <button
                 onClick={onClose}
                 className="p-1.5 rounded-lg text-ink-3 hover:text-ink hover:bg-raised cursor-pointer"
-                title="Close"
+                title={t('common.close')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -589,10 +622,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div className="space-y-6">
               <div className="space-y-2">
                 <h2 className="text-base font-medium text-ink">
-                  Choose Your Ledger Profile
+                  {t('onboarding.s1.heading')}
                 </h2>
                 <p className="text-xs text-ink-2">
-                  Select how you intend to use Koban. You can switch workspaces or enable both at any time.
+                  {t('onboarding.s1.desc')}
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-2">
@@ -634,12 +667,12 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
               <div className="p-4 rounded-xl bg-app border border-line space-y-3">
                 <div className="text-xs font-medium text-ink">
-                  Currency & Tax Defaults
+                  {t('onboarding.s1.currencyTaxTitle')}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-[11px] text-ink-2 mb-1">
-                      Primary Currency
+                      {t('settings.currency')}
                     </label>
                     <select
                       value={currency}
@@ -656,7 +689,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
                   <div>
                     <label className="block text-[11px] text-ink-2 mb-1">
-                      Default Freelancer VAT %
+                      {t('onboarding.s1.vatLabel')}
                     </label>
                     <input
                       type="number"
@@ -671,7 +704,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
                   <div>
                     <label className="block text-[11px] text-ink-2 mb-1">
-                      Tax Reserve Set-Aside %
+                      {t('onboarding.s1.taxReserveLabel')}
                     </label>
                     <input
                       type="number"
@@ -694,10 +727,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h2 className="text-base font-medium text-ink">
-                    Select & Customize Your Categories
+                    {t('onboarding.s2.heading')}
                   </h2>
                   <p className="text-xs text-ink-2 mt-0.5">
-                    Core categories are pre-checked. Uncheck any you don&apos;t need, check additional categories, or add custom ones.
+                    {t('onboarding.s2.desc')}
                   </p>
                 </div>
 
@@ -713,7 +746,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                             : 'text-ink-2 hover:text-ink'
                         }`}
                       >
-                        Home ({selectedHomeIds.size})
+                        {t('workspace.home')} ({selectedHomeIds.size})
                       </button>
                       <button
                         type="button"
@@ -724,7 +757,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                             : 'text-ink-2 hover:text-ink'
                         }`}
                       >
-                        Freelancer ({selectedFreelancerIds.size})
+                        {t('workspace.freelancer')} ({selectedFreelancerIds.size})
                       </button>
                     </div>
                   )}
@@ -739,7 +772,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                         }
                         className="rounded border-line"
                       />
-                      <span>Apply category changes</span>
+                      <span>{t('onboarding.s2.applyChanges')}</span>
                     </label>
                   )}
                 </div>
@@ -752,11 +785,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     <Repeat className="w-3 h-3" />
                   </span>
                   <span>
-                    Fixed items like <strong>Wages</strong>, <strong>Mortgage/Rent</strong>, <strong>Health Insurance</strong> &amp; <strong>Subscriptions</strong> are set as <strong>Recurring</strong> automatically. Click the{' '}
-                    <span className="inline-flex items-center px-1 py-0.5 rounded bg-indigo/15 text-indigo font-medium text-[10px]">
-                      <Repeat className="w-2.5 h-2.5 mr-0.5" /> recurring icon
-                    </span>{' '}
-                    on any category to toggle it on or off.
+                    {t('onboarding.s2.recurringLegend')}
                   </span>
                 </div>
 
@@ -766,9 +795,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     setRecurringCategoryIds(getDefaultRecurringCategoryIds())
                   }
                   className="text-[11px] text-indigo hover:underline font-medium shrink-0 cursor-pointer"
-                  title="Restore default recurring flags"
+                  title={t('onboarding.s2.resetRecurring')}
                 >
-                  Reset Recurring Defaults
+                  {t('onboarding.s2.resetRecurring')}
                 </button>
               </div>
 
@@ -804,7 +833,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                               onClick={() => setGroupSelection(grp, 'all')}
                               className="hover:text-ink cursor-pointer"
                             >
-                              All
+                              {t('onboarding.s2.all')}
                             </button>
                             <span>·</span>
                             <button
@@ -821,7 +850,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                               onClick={() => setGroupSelection(grp, 'none')}
                               className="hover:text-ink cursor-pointer"
                             >
-                              None
+                              {t('onboarding.s2.none')}
                             </button>
                           </div>
                         </div>
@@ -929,7 +958,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       <div className="flex items-center gap-1.5 pt-1">
                         <input
                           type="text"
-                          placeholder={`+ Add custom to ${grp.name.toLowerCase()}…`}
+                          placeholder={t('onboarding.s2.addCustomPlaceholder')}
                           value={customInputByGroup[grp.id] ?? ''}
                           onChange={(e) =>
                             setCustomInputByGroup((prev) => ({
@@ -951,7 +980,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                             onClick={() => handleAddCustomCategory(grp.id)}
                             className="h-6 px-2 rounded bg-ink text-on-ink text-[10px] cursor-pointer"
                           >
-                            Add
+                            {t('common.add')}
                           </button>
                         )}
                       </div>
@@ -969,20 +998,20 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-medium text-ink">
-                      Liquid Assets, Retirement & Custom Accounts
+                      {t('onboarding.s3.heading')}
                     </h2>
                     <span className="px-2 py-0.5 rounded bg-raised border border-line text-[10px] text-ink-2">
-                      Optional
+                      {t('onboarding.s3.optionalBadge')}
                     </span>
                   </div>
                   <p className="text-xs text-ink-2 mt-0.5">
-                    Configure your bank accounts, retirement funds (Pillar 2 / 3a / IRA), or custom accounts — or skip this step for setup later.
+                    {t('onboarding.s3.desc')}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <div className="px-3 py-1 rounded-lg bg-app border border-line text-xs tabular-nums">
-                    <span className="text-ink-3 mr-1.5">Est. Net Worth:</span>
+                    <span className="text-ink-3 mr-1.5">{t('onboarding.s3.estNetWorth')}</span>
                     <span
                       className={`font-semibold ${
                         previewNetWorth >= 0 ? 'text-positive' : 'text-accent'
@@ -1001,7 +1030,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     <div className="flex items-center gap-1.5">
                       <Landmark className="w-4 h-4 text-positive" />
                       <span className="text-xs font-medium text-ink">
-                        Liquid Assets & Bank Accounts
+                        {t('onboarding.s3.liquidTitle')}
                       </span>
                     </div>
                     <span className="text-xs font-medium text-positive tabular-nums">
@@ -1024,7 +1053,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                 name: e.target.value,
                               })
                             }
-                            placeholder="Account name (e.g. Main Checking)"
+                            placeholder={t('onboarding.s3.accountNamePlaceholder')}
                             className="flex-1 h-7 px-2 rounded bg-app border border-line text-xs text-ink focus:outline-none"
                           />
                           <select
@@ -1036,18 +1065,18 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                             }
                             className="h-7 px-1.5 rounded bg-app border border-line text-[11px] text-ink-2 focus:outline-none"
                           >
-                            <option value="checking">Checking</option>
-                            <option value="savings">Savings</option>
-                            <option value="business_bank">Business Bank</option>
-                            <option value="tax_reserve">Tax Reserve</option>
-                            <option value="cash">Cash / Wallet</option>
-                            <option value="custom">Custom</option>
+                            <option value="checking">{t('onboarding.s3.type.checking')}</option>
+                            <option value="savings">{t('onboarding.s3.type.savings')}</option>
+                            <option value="business_bank">{t('onboarding.s3.type.businessBank')}</option>
+                            <option value="tax_reserve">{t('onboarding.s3.type.taxReserve')}</option>
+                            <option value="cash">{t('onboarding.s3.type.cash')}</option>
+                            <option value="custom">{t('onboarding.s3.type.custom')}</option>
                           </select>
                           <button
                             type="button"
                             onClick={() => removeDraftAccount(acc.id)}
                             className="p-1 text-ink-3 hover:text-accent cursor-pointer"
-                            title="Remove account"
+                            title={t('common.remove')}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1062,7 +1091,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                 institution: e.target.value,
                               })
                             }
-                            placeholder="Bank / Institution (optional)"
+                            placeholder={t('onboarding.s3.bankPlaceholder')}
                             className="flex-1 h-7 px-2 rounded bg-app border border-line text-[11px] text-ink-2 placeholder:text-ink-3 focus:outline-none"
                           />
                           <div className="relative w-32">
@@ -1092,7 +1121,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     className="w-full h-8 inline-flex items-center justify-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add Another Bank / Liquid Account</span>
+                    <span>{t('onboarding.s3.addLiquid')}</span>
                   </button>
                 </div>
 
@@ -1102,7 +1131,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     <div className="flex items-center gap-1.5">
                       <Shield className="w-4 h-4 text-[#8a6fb0]" />
                       <span className="text-xs font-medium text-ink">
-                        Retirement, Investments & Custom
+                        {t('onboarding.s3.wealthTitle')}
                       </span>
                     </div>
                     <span className="text-xs font-medium text-ink tabular-nums">
@@ -1128,7 +1157,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                 name: e.target.value,
                               })
                             }
-                            placeholder="e.g. Pillar 3a, Pension, ETFs"
+                            placeholder={t('onboarding.s3.wealthNamePlaceholder')}
                             className="flex-1 h-7 px-2 rounded bg-app border border-line text-xs text-ink focus:outline-none"
                           />
                           <select
@@ -1140,19 +1169,19 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                             }
                             className="h-7 px-1.5 rounded bg-app border border-line text-[11px] text-ink-2 focus:outline-none"
                           >
-                            <option value="retirement">Retirement / Pension</option>
-                            <option value="brokerage">Brokerage / ETFs</option>
-                            <option value="crypto">Crypto</option>
-                            <option value="real_estate">Real Estate</option>
-                            <option value="credit_card">Credit Card (Debt)</option>
-                            <option value="loan">Loan / Mortgage (Debt)</option>
-                            <option value="custom">Custom Type…</option>
+                            <option value="retirement">{t('onboarding.s3.type.retirement')}</option>
+                            <option value="brokerage">{t('onboarding.s3.type.brokerage')}</option>
+                            <option value="crypto">{t('onboarding.s3.type.crypto')}</option>
+                            <option value="real_estate">{t('onboarding.s3.type.realEstate')}</option>
+                            <option value="credit_card">{t('onboarding.s3.type.creditCard')}</option>
+                            <option value="loan">{t('onboarding.s3.type.loan')}</option>
+                            <option value="custom">{t('onboarding.s3.type.custom')}</option>
                           </select>
                           <button
                             type="button"
                             onClick={() => removeDraftAccount(acc.id)}
                             className="p-1 text-ink-3 hover:text-accent cursor-pointer"
-                            title="Remove account"
+                            title={t('common.remove')}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1169,7 +1198,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                     customTypeLabel: e.target.value,
                                   })
                                 }
-                                placeholder="Custom type label…"
+                                placeholder={t('onboarding.s3.customTypePlaceholder')}
                                 className="flex-1 h-7 px-2 rounded bg-app border border-line text-[11px] text-ink placeholder:text-ink-3 focus:outline-none"
                               />
                               <select
@@ -1182,11 +1211,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                 }
                                 className="h-7 px-1.5 rounded bg-app border border-line text-[10px] text-ink-2"
                               >
-                                <option value="retirement">Retirement</option>
-                                <option value="investment">Investment</option>
-                                <option value="fixed_asset">Fixed Asset</option>
-                                <option value="liquid">Liquid</option>
-                                <option value="liability">Liability</option>
+                                <option value="retirement">{t('onboarding.s3.class.retirement')}</option>
+                                <option value="investment">{t('onboarding.s3.class.investment')}</option>
+                                <option value="fixed_asset">{t('onboarding.s3.class.fixedAsset')}</option>
+                                <option value="liquid">{t('onboarding.s3.class.liquid')}</option>
+                                <option value="liability">{t('onboarding.s3.class.liability')}</option>
                               </select>
                             </>
                           ) : (
@@ -1198,7 +1227,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                                   institution: e.target.value,
                                 })
                               }
-                              placeholder="Provider / Foundation (optional)"
+                              placeholder={t('onboarding.s3.providerPlaceholder')}
                               className="flex-1 h-7 px-2 rounded bg-app border border-line text-[11px] text-ink-2 placeholder:text-ink-3 focus:outline-none"
                             />
                           )}
@@ -1231,7 +1260,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       className="h-8 inline-flex items-center justify-center gap-1 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Add Retirement / ETF</span>
+                      <span>{t('onboarding.s3.addRetirement')}</span>
                     </button>
                     <button
                       type="button"
@@ -1239,7 +1268,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       className="h-8 inline-flex items-center justify-center gap-1 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Add Custom Account</span>
+                      <span>{t('onboarding.s3.addCustom')}</span>
                     </button>
                   </div>
                 </div>
@@ -1252,25 +1281,126 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div className="space-y-4">
               <div>
                 <h2 className="text-base font-medium text-ink">
-                  Passkey / Windows Hello Login, Encrypted Vault & Preferences
+                  {t('onboarding.s4.heading')}
                 </h2>
                 <p className="text-xs text-ink-2 mt-0.5">
-                  Configure Passkey / Windows Hello login protection, automatic encrypted SQLite backups, and month-to-month workflow preferences.
+                  {t('onboarding.s4.desc')}
                 </p>
               </div>
 
-              {/* Login & Passkey / Windows Hello Protection */}
+              {/* 1. Encrypted Vault, Custom Passphrase & Backup Path */}
+              <div className="p-4 rounded-xl bg-app border border-line space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-positive" />
+                    <span className="text-xs font-medium text-ink">
+                      {t('onboarding.s4.vaultTitle')}
+                    </span>
+                    {requiresCustomPassphrase ? (
+                      <span className="px-2 py-0.5 rounded-full bg-warning/15 border border-warning/35 text-warning text-[10px] font-medium">
+                        {t('onboarding.s4.requiredBadge')}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-positive/12 border border-positive/30 text-positive text-[10px] font-medium">
+                        {t('onboarding.s4.configuredBadge')}
+                      </span>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-ink-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoBackup}
+                      onChange={(e) => setAutoBackup(e.target.checked)}
+                      className="rounded border-line"
+                    />
+                    <span>{t('onboarding.s4.autoBackup')}</span>
+                  </label>
+                </div>
+
+                <p className="text-[11px] text-ink-2 leading-relaxed">
+                  {requiresCustomPassphrase
+                    ? t('onboarding.s4.vaultDescRequired')
+                    : t('onboarding.s4.vaultDescConfigured')}
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  <div className="relative">
+                    <Lock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
+                    <input
+                      type="password"
+                      placeholder={
+                        requiresCustomPassphrase
+                          ? t('onboarding.s4.passphrasePlaceholderReq')
+                          : t('onboarding.s4.passphrasePlaceholderOpt')
+                      }
+                      value={vaultPassphrase}
+                      onChange={(e) => setVaultPassphrase(e.target.value)}
+                      className="w-full h-9 pl-8 pr-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
+                    <input
+                      type="password"
+                      placeholder={
+                        requiresCustomPassphrase
+                          ? t('onboarding.s4.confirmPlaceholderReq')
+                          : t('onboarding.s4.confirmPlaceholderOpt')
+                      }
+                      value={vaultPassphraseConfirm}
+                      onChange={(e) => setVaultPassphraseConfirm(e.target.value)}
+                      className="w-full h-9 pl-8 pr-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {passphraseError && (trimmedPassphrase.length > 0 || trimmedPassphraseConfirm.length > 0 || requiresCustomPassphrase) && (
+                  <p className={`text-[11px] ${trimmedPassphrase.length === 0 && trimmedPassphraseConfirm.length === 0 ? 'text-ink-2' : 'text-accent'}`}>
+                    {passphraseError}
+                  </p>
+                )}
+
+                <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-warning/10 border border-warning/30 text-[11px] text-ink">
+                  <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-medium">{t('onboarding.s4.docWarningTitle')}</span>{' '}
+                    <span className="text-ink-2">
+                      {t('onboarding.s4.docWarningDesc')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder={`${t('onboarding.s4.backupFolderPlaceholder')}: D:\\Backups\\Koban`}
+                    value={backupDir}
+                    onChange={(e) => setBackupDir(e.target.value)}
+                    className="flex-1 h-9 px-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleChooseBackupFolder}
+                    className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/60 transition-colors shrink-0 cursor-pointer"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span>{t('onboarding.s4.browse')}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Login & Passkey / Windows Hello Protection */}
               <div className="p-4 rounded-xl bg-app border border-line space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Fingerprint className="w-4 h-4 text-indigo" />
                     <span className="text-xs font-medium text-ink">
-                      Passkey & Windows Hello Login Protection
+                      {t('onboarding.s4.loginTitle')}
                     </span>
                     {authConfig.passkeys.length > 0 && (
                       <span className="px-2 py-0.5 rounded-full bg-positive/12 border border-positive/30 text-positive text-[10px] font-medium inline-flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" />
-                        <span>{authConfig.passkeys.length} Passkey Enrolled</span>
+                        <span>{authConfig.passkeys.length} {t('onboarding.s4.passkeyEnrolled')}</span>
                       </span>
                     )}
                   </div>
@@ -1283,98 +1413,48 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       }
                       className="rounded border-line"
                     />
-                    <span>Require Login on Startup</span>
+                    <span>{t('onboarding.s4.requireLoginStartup')}</span>
                   </label>
                 </div>
 
                 <div className="flex flex-wrap items-end gap-2.5">
                   <div className="flex-[1_1_180px] min-w-[160px]">
                     <label className="block text-[11px] text-ink-2 mb-1">
-                      Account Owner Name
+                      {t('onboarding.s4.ownerNameLabel')}
                     </label>
                     <input
                       type="text"
                       value={userDisplayName}
                       onChange={(e) => setUserDisplayName(e.target.value)}
-                      placeholder="e.g. Roland"
+                      placeholder="Koban Owner"
                       className="w-full h-9 px-3 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
                     />
                   </div>
 
                   <button
                     type="button"
-                    disabled={isEnrollingPasskey}
+                    disabled={isEnrollingPasskey || !isPassphraseValid}
                     onClick={handleEnrollPasskeyInOnboarding}
-                    className="h-9 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                    className="h-9 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Fingerprint className="w-3.5 h-3.5" />
                     <span>
                       {authConfig.passkeys.length > 0
-                        ? 'Add Another Passkey / Windows Hello'
-                        : 'Enroll Passkey / Windows Hello'}
+                        ? t('onboarding.s4.addAnotherPasskeyBtn')
+                        : t('onboarding.s4.enrollBtn')}
                     </span>
                   </button>
                 </div>
 
+                {!isPassphraseValid && (
+                  <p className="text-[11px] text-ink-3">
+                    {t('onboarding.s4.passkeyGateHint')}
+                  </p>
+                )}
+
                 {passkeyStatusMsg && (
                   <p className="text-[11px] text-indigo">{passkeyStatusMsg}</p>
                 )}
-              </div>
-
-              {/* Encrypted Vault & Backup Path */}
-              <div className="p-4 rounded-xl bg-app border border-line space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-positive" />
-                    <span className="text-xs font-medium text-ink">
-                      AES-256-GCM Encrypted Database & Automatic Backups
-                    </span>
-                  </div>
-                  <label className="flex items-center gap-2 text-xs text-ink-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoBackup}
-                      onChange={(e) => setAutoBackup(e.target.checked)}
-                      className="rounded border-line"
-                    />
-                    <span>Auto-backup on changes</span>
-                  </label>
-                </div>
-
-                <p className="text-[11px] text-ink-2 leading-relaxed">
-                  All records inside <code className="text-ink">koban.db</code> and your backup snapshots (<code className="text-ink">koban-latest.db</code>) are encrypted at rest with authenticated <strong>AES-256-GCM</strong>.
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
-                  <div className="md:col-span-8 flex items-center gap-2">
-                    <input
-                      type="text"
-                      placeholder="Backup Folder: e.g. D:\Backups\Koban"
-                      value={backupDir}
-                      onChange={(e) => setBackupDir(e.target.value)}
-                      className="flex-1 h-9 px-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleChooseBackupFolder}
-                      className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/60 transition-colors shrink-0 cursor-pointer"
-                    >
-                      <FolderOpen className="w-3.5 h-3.5" />
-                      <span>Browse…</span>
-                    </button>
-                  </div>
-
-                  <div className="md:col-span-4 relative">
-                    <Lock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-                    <input
-                      type="password"
-                      placeholder="Optional custom vault passphrase"
-                      value={vaultPassphrase}
-                      onChange={(e) => setVaultPassphrase(e.target.value)}
-                      className="w-full h-9 pl-8 pr-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
-                    />
-                  </div>
-                </div>
               </div>
 
               {/* Behavioral Options */}
@@ -1382,7 +1462,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <div className="flex items-center gap-2">
                   <SlidersHorizontal className="w-4 h-4 text-indigo" />
                   <span className="text-xs font-medium text-ink">
-                    Month-to-Month Copy & Behavioral Preferences
+                    {t('onboarding.s4.behaviorTitle')}
                   </span>
                 </div>
 
@@ -1398,10 +1478,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     />
                     <div>
                       <div className="font-medium text-ink">
-                        Ask confirmation before copying monthly values
+                        {t('onboarding.s4.confirmCopyTitle')}
                       </div>
                       <p className="text-[11px] text-ink-3 mt-0.5">
-                        Always ask if you are sure before copying last month&apos;s values into the next month.
+                        {t('onboarding.s4.confirmCopyDesc')}
                       </p>
                     </div>
                   </label>
@@ -1417,10 +1497,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     />
                     <div>
                       <div className="font-medium text-ink">
-                        Offer carry-over when switching to an empty month
+                        {t('onboarding.s4.autoPromptCopyTitle')}
                       </div>
                       <p className="text-[11px] text-ink-3 mt-0.5">
-                        Show a one-click banner when viewing a new month that has no values yet.
+                        {t('onboarding.s4.autoPromptCopyDesc')}
                       </p>
                     </div>
                   </label>
@@ -1428,7 +1508,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                   <span className="text-xs text-ink-2">
-                    Default values to copy from previous month:
+                    {t('onboarding.s4.copyScopeLabel')}
                   </span>
                   <select
                     value={monthCopyScope}
@@ -1438,10 +1518,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     className="h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink"
                   >
                     <option value="budgets_and_actuals">
-                      Both Planned Budgets & Direct Actuals
+                      {t('onboarding.s4.copyScopeBoth')}
                     </option>
                     <option value="budgets_only">
-                      Planned Budgets Only (Reset Actuals to 0)
+                      {t('onboarding.s4.copyScopeBudgetsOnly')}
                     </option>
                   </select>
                 </div>
@@ -1460,7 +1540,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink hover:bg-raised transition-colors cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Back</span>
+                <span>{t('common.back')}</span>
               </button>
             ) : (
               currentSettings.setupCompleted &&
@@ -1470,7 +1550,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   onClick={onClose}
                   className="h-9 px-4 rounded-lg text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               )
             )}
@@ -1487,7 +1567,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
               >
                 <FastForward className="w-3.5 h-3.5" />
-                <span>Skip This Step for Setup Later</span>
+                <span>{t('onboarding.skipStep')}</span>
               </button>
             )}
 
@@ -1502,23 +1582,24 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               >
                 <span>
                   {step === 1
-                    ? 'Next: Categories'
+                    ? t('onboarding.nextCategories')
                     : step === 2
-                      ? 'Next: Accounts & Net Worth'
-                      : 'Next: Vault & Preferences'}
+                      ? t('onboarding.nextAccounts')
+                      : t('onboarding.nextVault')}
                 </span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             ) : (
               <button
                 type="button"
+                disabled={!isPassphraseValid}
                 onClick={handleFinish}
-                className="h-9 px-5 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                className="h-9 px-5 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>
                   {currentSettings.setupCompleted
-                    ? 'Save Setup & Preferences'
+                    ? t('onboarding.savePreferences')
                     : t('onboarding.finish')}
                 </span>
               </button>

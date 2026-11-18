@@ -19,6 +19,9 @@ import {
   Plus,
   Palette,
   Check,
+  RefreshCw,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import {
   AppSettings,
@@ -28,6 +31,12 @@ import {
   ThemePalette,
 } from '../types';
 import { pickFolderDialog } from '../utils/storage';
+import {
+  APP_VERSION,
+  GITHUB_RELEASES_URL,
+  UpdateCheckResult,
+  openExternalUrl,
+} from '../utils/updater';
 import { useI18n } from '../i18n';
 import { LanguageSelect } from './LanguageSelect';
 import { DbLocationCard } from './DbLocationCard';
@@ -47,6 +56,10 @@ interface SettingsViewProps {
   onOpenSetupWizard: () => void;
   onOpenBackupsTab: () => void;
   onReloadLedgerState?: () => Promise<void>;
+  updateInfo?: UpdateCheckResult | null;
+  isCheckingUpdate?: boolean;
+  updateCheckError?: string | null;
+  onCheckForUpdates?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -58,6 +71,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onOpenSetupWizard,
   onOpenBackupsTab,
   onReloadLedgerState,
+  updateInfo,
+  isCheckingUpdate = false,
+  updateCheckError = null,
+  onCheckForUpdates,
 }) => {
   const { t } = useI18n();
   const [newCredentialLabel, setNewCredentialLabel] = useState(
@@ -1016,6 +1033,112 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         onUpdateSettings={onUpdateSettings}
         onStateReloaded={onReloadLedgerState}
       />
+
+      {/* 7. Application Updates */}
+      <section className="p-5 rounded-xl bg-surface border border-line space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-indigo" />
+            <div>
+              <h2 className="text-sm font-medium text-ink">
+                {t('settings.updates.title')}
+              </h2>
+              <p className="text-xs text-ink-2">
+                {t('settings.updates.desc')}
+              </p>
+            </div>
+          </div>
+
+          <span className="px-2.5 py-0.5 rounded-full bg-app border border-line text-[11px] font-mono text-ink-2">
+            {t('settings.updates.currentVersion')}: v{updateInfo?.current_version ?? APP_VERSION}
+          </span>
+        </div>
+
+        <label className="flex items-start gap-2.5 p-3 rounded-lg bg-app border border-line cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.autoCheckUpdates ?? true}
+            onChange={(e) =>
+              onUpdateSettings({ autoCheckUpdates: e.target.checked })
+            }
+            className="mt-0.5 rounded border-line"
+          />
+          <div>
+            <div className="text-xs font-medium text-ink">
+              {t('settings.updates.autoCheck')}
+            </div>
+            <p className="text-[11px] text-ink-3 mt-0.5">
+              {t('settings.updates.autoCheckDesc')}
+            </p>
+          </div>
+        </label>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs">
+            {isCheckingUpdate && (
+              <span className="text-ink-2">{t('settings.updates.checking')}</span>
+            )}
+            {!isCheckingUpdate && updateCheckError && (
+              <span className="text-accent">
+                {t('settings.updates.error').replace('{error}', updateCheckError)}
+              </span>
+            )}
+            {!isCheckingUpdate && !updateCheckError && updateInfo && (
+              updateInfo.update_available ? (
+                <span className="text-positive font-medium">
+                  {t('settings.updates.available')
+                    .replace('{latest}', updateInfo.latest_version)
+                    .replace('{current}', updateInfo.current_version)}
+                </span>
+              ) : (
+                <span className="text-ink-2">
+                  {t('settings.updates.upToDate').replace('{version}', updateInfo.current_version)}
+                </span>
+              )
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openExternalUrl(updateInfo?.release_url || GITHUB_RELEASES_URL)}
+              className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-app border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>{t('settings.updates.viewReleases')}</span>
+            </button>
+
+            {updateInfo?.update_available && (
+              <button
+                type="button"
+                onClick={() => openExternalUrl(updateInfo.download_url || updateInfo.release_url)}
+                className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-positive text-white text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>
+                  {t('settings.updates.download').replace('{version}', updateInfo.latest_version)}
+                </span>
+              </button>
+            )}
+
+            {onCheckForUpdates && (
+              <button
+                type="button"
+                disabled={isCheckingUpdate}
+                onClick={onCheckForUpdates}
+                className="h-9 px-4 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                <span>
+                  {isCheckingUpdate
+                    ? t('settings.updates.checking')
+                    : t('settings.updates.checkNow')}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

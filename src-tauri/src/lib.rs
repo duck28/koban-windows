@@ -81,6 +81,17 @@ pub struct WebDavSyncResult {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: String,
+    pub update_available: bool,
+    pub release_url: String,
+    pub download_url: Option<String>,
+    pub release_name: Option<String>,
+    pub published_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WebDavRemoteInfo {
     pub exists: bool,
     pub size: Option<u64>,
@@ -1900,6 +1911,123 @@ try {
     }
 }
 
+const KOBAN_WINDOWS_RELEASES_API: &str =
+    "https://api.github.com/repos/duck28/koban-windows/releases/latest";
+const KOBAN_WINDOWS_RELEASES_URL: &str =
+    "https://github.com/duck28/koban-windows/releases";
+
+fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
+    let trimmed = v.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+    let mut parts = trimmed.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next()?.parse::<u64>().ok()?;
+    let patch_raw = parts.next()?;
+    let patch_num = patch_raw
+        .split(|c: char| !c.is_ascii_digit())
+        .next()
+        .filter(|s| !s.is_empty())?;
+    let patch = patch_num.parse::<u64>().ok()?;
+    Some((major, minor, patch))
+}
+
+fn is_newer_version(current: &str, latest: &str) -> bool {
+    match (parse_semver(current), parse_semver(latest)) {
+        (Some(c), Some(l)) => l > c,
+        _ => false,
+    }
+}
+
+#[derive(Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubLatestRelease {
+    tag_name: String,
+    html_url: String,
+    name: Option<String>,
+    published_at: Option<String>,
+    #[serde(default)]
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+fn check_for_updates_impl() -> Result<UpdateCheckResult, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(8))
+        .timeout_read(Duration::from_secs(10))
+        .build();
+
+    let resp = agent
+        .get(KOBAN_WINDOWS_RELEASES_API)
+        .set("Accept", "application/vnd.github+json")
+        .set("User-Agent", &format!("Koban-Windows/{}", current_version))
+        .call();
+
+    match resp {
+        Ok(r) => {
+            let body = r
+                .into_string()
+                .map_err(|e| format!("Failed to read release response: {}", e))?;
+            let release: GitHubLatestRelease = serde_json::from_str(&body)
+                .map_err(|e| format!("Failed to parse release metadata: {}", e))?;
+            let latest_version = release
+                .tag_name
+                .trim()
+                .trim_start_matches(|c| c == 'v' || c == 'V')
+                .to_string();
+            let update_available = is_newer_version(&current_version, &latest_version);
+            let download_url = release
+                .assets
+                .iter()
+                .find(|a| a.name.to_ascii_lowercase().ends_with("-setup.exe"))
+                .or_else(|| {
+                    release
+                        .assets
+                        .iter()
+                        .find(|a| a.name.to_ascii_lowercase().ends_with(".exe"))
+                })
+                .or_else(|| {
+                    release
+                        .assets
+                        .iter()
+                        .find(|a| a.name.to_ascii_lowercase().ends_with(".msi"))
+                })
+                .map(|a| a.browser_download_url.clone());
+
+            Ok(UpdateCheckResult {
+                current_version,
+                latest_version,
+                update_available,
+                release_url: release.html_url,
+                download_url,
+                release_name: release.name,
+                published_at: release.published_at,
+            })
+        }
+        Err(ureq::Error::Status(404, _)) => Ok(UpdateCheckResult {
+            current_version: current_version.clone(),
+            latest_version: current_version,
+            update_available: false,
+            release_url: KOBAN_WINDOWS_RELEASES_URL.to_string(),
+            download_url: None,
+            release_name: None,
+            published_at: None,
+        }),
+        Err(ureq::Error::Status(code, _)) => {
+            Err(format!("GitHub Releases returned HTTP {}", code))
+        }
+        Err(ureq::Error::Transport(t)) => Err(format!("Network error: {}", t)),
+    }
+}
+
+#[tauri::command]
+async fn check_for_updates() -> Result<UpdateCheckResult, String> {
+    run_blocking(check_for_updates_impl).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1933,7 +2061,8 @@ pub fn run() {
             pull_from_webdav,
             webdav_check,
             webdav_download_vault,
-            webdav_forget_sync_state
+            webdav_forget_sync_state,
+            check_for_updates
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2084,5 +2213,20 @@ mod tests {
         assert!(validate_downloaded_vault(&not_sqlite).is_err());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn semver_update_comparison() {
+        assert_eq!(parse_semver("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_semver("0.1.0"), Some((0, 1, 0)));
+        assert_eq!(parse_semver("V2.0.1-rc1"), Some((2, 0, 1)));
+        assert_eq!(parse_semver("invalid"), None);
+
+        assert!(is_newer_version("0.1.0", "0.2.0"));
+        assert!(is_newer_version("0.1.0", "v1.0.0"));
+        assert!(is_newer_version("1.2.9", "1.2.10"));
+        assert!(!is_newer_version("0.2.0", "0.2.0"));
+        assert!(!is_newer_version("0.2.0", "0.1.9"));
+        assert!(!is_newer_version("0.1.0", "invalid"));
     }
 }
