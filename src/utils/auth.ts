@@ -1,406 +1,172 @@
-import { invoke } from '@tauri-apps/api/core';
-import { AuthConfig, PasskeyCredentialRecord } from '../types';
-import { isTauriEnv } from './storage';
+import { AuthSettings } from '../types';
 
-const AUTH_STORAGE_KEY = 'koban_auth_config_v1';
+export const MIN_VAULT_PASSPHRASE_LENGTH = 12;
 
-export const DEFAULT_AUTH_CONFIG: AuthConfig = {
-  enabled: false,
-  userDisplayName: 'Koban Owner',
-  autoPromptPasskeyOnLaunch: false,
+export const DEFAULT_AUTH_SETTINGS: AuthSettings = {
+  autoPromptDevice: true,
   autoLockMinutes: 15,
-  passkeys: [],
-  hasMasterPassphrase: false,
+  lockOnMinimize: false,
 };
 
-function bufferToBase64Url(buf: ArrayBuffer | Uint8Array): string {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function base64UrlToUint8Array(base64Url: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64Url.length % 4)) % 4);
-  const base64 = (base64Url + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(base64);
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    out[i] = raw.charCodeAt(i);
-  }
-  return out;
-}
-
-/** Desktop only: older builds also mirrored the auth config into WebView2 localStorage. */
-function purgeLegacyAuthCopy(): void {
-  if (!isTauriEnv()) return;
-  try {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-  } catch {
-    // ignore storage errors
-  }
-}
-
-export async function loadAuthConfig(): Promise<AuthConfig> {
-  try {
-    if (isTauriEnv()) {
-      const raw = await invoke<string | null>('get_auth_config');
-      if (raw) {
-        purgeLegacyAuthCopy();
-        const parsed = JSON.parse(raw) as Partial<AuthConfig>;
-        return {
-          ...DEFAULT_AUTH_CONFIG,
-          ...parsed,
-          passkeys: parsed.passkeys ?? [],
-        };
-      }
-    }
-    const local = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (local) {
-      const parsed = JSON.parse(local) as Partial<AuthConfig>;
-      return {
-        ...DEFAULT_AUTH_CONFIG,
-        ...parsed,
-        passkeys: parsed.passkeys ?? [],
-      };
-    }
-  } catch (err) {
-    console.error('Failed to load auth config:', err);
-  }
-  return { ...DEFAULT_AUTH_CONFIG };
-}
-
-export async function saveAuthConfig(config: AuthConfig): Promise<void> {
-  const json = JSON.stringify(config);
-  if (isTauriEnv()) {
-    await invoke('save_auth_config', { configJson: json });
-    purgeLegacyAuthCopy();
-    return;
-  }
-  try {
-    localStorage.setItem(AUTH_STORAGE_KEY, json);
-  } catch {
-    // ignore storage quota errors
-  }
-}
-
-export async function checkBiometricPasskeySupport(): Promise<{
-  webauthnAvailable: boolean;
-  platformAuthenticatorAvailable: boolean;
-  windowsHelloNativeAvailable: boolean;
-}> {
-  const webauthnAvailable =
-    typeof window !== 'undefined' &&
-    typeof window.PublicKeyCredential !== 'undefined' &&
-    typeof navigator.credentials?.create === 'function';
-
-  let platformAuthenticatorAvailable = false;
-  if (
-    webauthnAvailable &&
-    typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable ===
-      'function'
-  ) {
-    try {
-      platformAuthenticatorAvailable =
-        await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    } catch {
-      platformAuthenticatorAvailable = false;
-    }
-  }
-
-  let windowsHelloNativeAvailable = false;
-  if (isTauriEnv()) {
-    try {
-      windowsHelloNativeAvailable = await invoke<boolean>(
-        'check_windows_hello_available'
-      );
-    } catch {
-      windowsHelloNativeAvailable = false;
-    }
-  }
-
-  return {
-    webauthnAvailable,
-    platformAuthenticatorAvailable,
-    windowsHelloNativeAvailable,
-  };
+export interface PassphraseStrength {
+  length: number;
+  estimatedBits: number;
+  score: 0 | 1 | 2 | 3 | 4; // 0=too short, 1=weak, 2=fair, 3=good, 4=strong
+  meetsMinimum: boolean;
+  labelKey: string;
 }
 
 /**
- * Legacy only. Older builds stored the vault passphrase in `wrappedVaultSecret`, encrypted with a key
- * derived from the credential id and the vault salt — both plaintext in the same file, so the
- * passphrase was recoverable from koban.db alone. New credentials never get a wrapped secret; existing
- * ones are still read so users who rely on them are not locked out before the v2 vault format
- * (docs/VAULT-V2-SPEC.md) migrates them.
+ * Estimates passphrase entropy in bits (KeePassXC-inspired character-class + uniqueness model).
+ * Always enforces a strict 12-character minimum for Vault Format v2 master passwords.
  */
-export async function unwrapVaultSecret(
-  credentialId: string,
-  wrappedToken?: string
-): Promise<string | undefined> {
-  if (!wrappedToken) return undefined;
-  if (isTauriEnv()) {
-    return invoke<string>('unwrap_vault_secret_for_credential', {
-      credentialId,
-      wrappedToken,
-    });
-  }
-  try {
-    return decodeURIComponent(escape(atob(wrappedToken)));
-  } catch {
-    return undefined;
-  }
-}
+export function evaluatePassphraseStrength(raw: string): PassphraseStrength {
+  const value = raw ?? '';
+  const chars = Array.from(value);
+  const length = chars.length;
 
-export async function registerPasskeyOrWindowsHello(opts: {
-  userDisplayName: string;
-  credentialLabel?: string;
-  preferMode?: 'auto' | 'webauthn' | 'windows_hello';
-}): Promise<PasskeyCredentialRecord> {
-  const preferMode = opts.preferMode ?? 'auto';
-  const now = Math.floor(Date.now() / 1000);
-  const displayName = opts.userDisplayName.trim() || 'Koban Owner';
+  let hasLower = false;
+  let hasUpper = false;
+  let hasDigit = false;
+  let hasSymbol = false;
+  let hasExtended = false;
 
-  // 1. Try WebAuthn Passkey (triggers Windows Hello Passkey dialog or FIDO2 security key)
-  if (
-    preferMode !== 'windows_hello' &&
-    typeof window !== 'undefined' &&
-    typeof window.PublicKeyCredential !== 'undefined'
-  ) {
-    try {
-      const challenge = new Uint8Array(32);
-      crypto.getRandomValues(challenge);
-      const userId = new Uint8Array(16);
-      crypto.getRandomValues(userId);
-
-      const createOptions: PublicKeyCredentialCreationOptions = {
-        challenge,
-        rp: {
-          name: 'Koban Encrypted Budget & Net Worth',
-          id: window.location.hostname || 'localhost',
-        },
-        user: {
-          id: userId,
-          name: displayName.toLowerCase().replace(/\s+/g, '.'),
-          displayName,
-        },
-        pubKeyCredParams: [
-          { alg: -7, type: 'public-key' }, // ES256
-          { alg: -257, type: 'public-key' }, // RS256
-        ],
-        authenticatorSelection: {
-          userVerification: 'required',
-          residentKey: 'preferred',
-        },
-        timeout: 60000,
-        attestation: 'none',
-      };
-
-      const cred = (await navigator.credentials.create({
-        publicKey: createOptions,
-      })) as PublicKeyCredential | null;
-
-      if (cred) {
-        const credentialId = bufferToBase64Url(cred.rawId);
-        const response = cred.response as AuthenticatorAttestationResponse;
-        const pubKeyBuf =
-          typeof response.getPublicKey === 'function'
-            ? response.getPublicKey()
-            : null;
-        const publicKeyB64 = pubKeyBuf
-          ? bufferToBase64Url(pubKeyBuf)
-          : undefined;
-
-        return {
-          id: credentialId,
-          name:
-            opts.credentialLabel?.trim() ||
-            'Passkey / Windows Hello (WebAuthn)',
-          kind: 'webauthn_passkey',
-          createdAt: now,
-          lastUsedAt: now,
-          publicKeyB64,
-        };
-      }
-    } catch (webauthnErr) {
-      // If user explicitly chose webauthn or we are not in Tauri on Windows, rethrow unless fallback applies
-      if (preferMode === 'webauthn' || !isTauriEnv()) {
-        throw webauthnErr instanceof Error
-          ? webauthnErr
-          : new Error(String(webauthnErr));
-      }
-    }
+  for (const ch of chars) {
+    if (ch >= 'a' && ch <= 'z') hasLower = true;
+    else if (ch >= 'A' && ch <= 'Z') hasUpper = true;
+    else if (ch >= '0' && ch <= '9') hasDigit = true;
+    else if (ch.charCodeAt(0) < 128) hasSymbol = true;
+    else hasExtended = true;
   }
 
-  // 2. Native Windows Hello OS Verification (via Tauri WinRT UserConsentVerifier)
-  if (isTauriEnv()) {
-    const verified = await invoke<boolean>('verify_windows_hello', {
-      message: `Register Windows Hello for ${displayName} in Koban Vault`,
-    });
-    if (!verified) {
-      throw new Error('Windows Hello verification did not complete.');
-    }
-    const randomIdBytes = new Uint8Array(16);
-    crypto.getRandomValues(randomIdBytes);
-    const credentialId = `winhello-${bufferToBase64Url(randomIdBytes)}`;
+  let pool = 0;
+  if (hasLower) pool += 26;
+  if (hasUpper) pool += 26;
+  if (hasDigit) pool += 10;
+  if (hasSymbol) pool += 33;
+  if (hasExtended) pool += 64;
 
-    return {
-      id: credentialId,
-      name: opts.credentialLabel?.trim() || 'Windows Hello (Biometric / PIN)',
-      kind: 'windows_hello_native',
-      createdAt: now,
-      lastUsedAt: now,
-    };
+  const uniqueRatio = length > 0 ? new Set(chars).size / length : 0;
+  const effectiveBits =
+    length === 0 || pool === 0
+      ? 0
+      : Math.round(length * Math.log2(pool) * Math.max(0.55, Math.min(1, uniqueRatio + 0.18)));
+
+  const meetsMinimum = length >= MIN_VAULT_PASSPHRASE_LENGTH;
+
+  let score: 0 | 1 | 2 | 3 | 4 = 0;
+  if (!meetsMinimum) {
+    score = 0;
+  } else if (effectiveBits < 52) {
+    score = 1;
+  } else if (effectiveBits < 72) {
+    score = 2;
+  } else if (effectiveBits < 96) {
+    score = 3;
+  } else {
+    score = 4;
   }
 
-  throw new Error(
-    'Passkeys / Windows Hello are not supported in this environment.'
-  );
-}
-
-export async function authenticateWithPasskeyOrWindowsHello(
-  config: AuthConfig,
-  specificCredentialId?: string
-): Promise<{
-  verified: boolean;
-  credential: PasskeyCredentialRecord;
-  unwrappedVaultSecret?: string;
-}> {
-  const candidates = specificCredentialId
-    ? config.passkeys.filter((p) => p.id === specificCredentialId)
-    : config.passkeys;
-
-  if (candidates.length === 0) {
-    throw new Error('No Passkey or Windows Hello credential is registered.');
-  }
-
-  const webauthnCreds = candidates.filter((c) => c.kind === 'webauthn_passkey');
-  const winHelloCreds = candidates.filter(
-    (c) => c.kind === 'windows_hello_native'
-  );
-
-  // 1. Try WebAuthn Passkeys first if present
-  if (
-    webauthnCreds.length > 0 &&
-    typeof window !== 'undefined' &&
-    typeof window.PublicKeyCredential !== 'undefined'
-  ) {
-    try {
-      const challenge = new Uint8Array(32);
-      crypto.getRandomValues(challenge);
-
-      const allowCredentials: PublicKeyCredentialDescriptor[] =
-        webauthnCreds.map((c) => ({
-          id: base64UrlToUint8Array(c.id) as unknown as BufferSource,
-          type: 'public-key',
-        }));
-
-      const assertion = (await navigator.credentials.get({
-        publicKey: {
-          challenge,
-          rpId: window.location.hostname || 'localhost',
-          allowCredentials,
-          userVerification: 'required',
-          timeout: 60000,
-        },
-      })) as PublicKeyCredential | null;
-
-      if (assertion) {
-        const matchedId = bufferToBase64Url(assertion.rawId);
-        const matched =
-          webauthnCreds.find((c) => c.id === matchedId) ?? webauthnCreds[0];
-        const unwrappedVaultSecret = await unwrapVaultSecret(
-          matched.id,
-          matched.wrappedVaultSecret
-        );
-        return {
-          verified: true,
-          credential: matched,
-          unwrappedVaultSecret,
-        };
-      }
-    } catch (err) {
-      if (winHelloCreds.length === 0) {
-        throw err instanceof Error ? err : new Error(String(err));
-      }
-    }
-  }
-
-  // 2. Native Windows Hello credential verification
-  if (winHelloCreds.length > 0 && isTauriEnv()) {
-    const target = winHelloCreds[0];
-    const verified = await invoke<boolean>('verify_windows_hello', {
-      message: `Unlock Koban Vault for ${config.userDisplayName || 'Koban Owner'}`,
-    });
-    if (verified) {
-      const unwrappedVaultSecret = await unwrapVaultSecret(
-        target.id,
-        target.wrappedVaultSecret
-      );
-      return {
-        verified: true,
-        credential: target,
-        unwrappedVaultSecret,
-      };
-    }
-  }
-
-  throw new Error('Passkey / Windows Hello authentication failed.');
-}
-
-export async function hashPassphraseVerifier(
-  passphrase: string,
-  existingSaltB64?: string
-): Promise<{ saltB64: string; hashB64: string }> {
-  const salt = existingSaltB64
-    ? base64UrlToUint8Array(existingSaltB64)
-    : (() => {
-        const s = new Uint8Array(16);
-        crypto.getRandomValues(s);
-        return s;
-      })();
-
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(passphrase),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits']
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt: salt as unknown as BufferSource,
-      iterations: 100000,
-      hash: 'SHA-256',
-    },
-    keyMaterial,
-    256
-  );
+  const labelMap: Record<0 | 1 | 2 | 3 | 4, string> = {
+    0: 'vault.strengthTooShort',
+    1: 'vault.strengthWeak',
+    2: 'vault.strengthFair',
+    3: 'vault.strengthGood',
+    4: 'vault.strengthStrong',
+  };
 
   return {
-    saltB64: bufferToBase64Url(salt),
-    hashB64: bufferToBase64Url(derivedBits),
+    length,
+    estimatedBits: effectiveBits,
+    score,
+    meetsMinimum,
+    labelKey: labelMap[score],
   };
 }
 
-export async function verifyMasterPassphrase(
-  passphrase: string,
-  config: AuthConfig
-): Promise<boolean> {
-  if (
-    !config.hasMasterPassphrase ||
-    !config.passphraseSaltB64 ||
-    !config.passphraseVerifierHashB64
-  ) {
-    return false;
+const PASSPHRASE_WORDS = [
+  'amber', 'anchor', 'apricot', 'atlas', 'autumn', 'bamboo', 'beacon', 'breeze',
+  'canyon', 'cedar', 'cinder', 'cobalt', 'compass', 'copper', 'coral', 'cosmos',
+  'crimson', 'crystal', 'cypress', 'dawn', 'delta', 'dolphin', 'dune', 'echo',
+  'eclipse', 'emerald', 'falcon', 'fathom', 'feather', 'flint', 'forest', 'fossil',
+  'frost', 'galaxy', 'garnet', 'glacier', 'granite', 'harbor', 'hazel', 'horizon',
+  'indigo', 'island', 'ivory', 'jasper', 'juniper', 'kestrel', 'lagoon', 'lantern',
+  'larch', 'laurel', 'linen', 'lotus', 'lunar', 'maple', 'marble', 'meadow',
+  'mercury', 'mesa', 'monarch', 'mosaic', 'nebula', 'nectar', 'nickel', 'nimbus',
+  'north', 'oak', 'obsidian', 'ochre', 'olive', 'onyx', 'opal', 'orbit',
+  'orchid', 'osprey', 'pebble', 'pelican', 'petal', 'pine', 'planet', 'platinum',
+  'plume', 'polar', 'prairie', 'prism', 'quartz', 'quill', 'raven', 'redwood',
+  'ridge', 'ripple', 'river', 'saffron', 'sapphire', 'sequoia', 'shadow', 'sierra',
+  'signal', 'silver', 'solstice', 'spruce', 'starlight', 'stone', 'summit', 'sunlit',
+  'tamarind', 'terra', 'thistle', 'timber', 'topaz', 'torrent', 'tundra', 'umber',
+  'valley', 'velvet', 'vermilion', 'vesper', 'violet', 'walnut', 'whisper', 'willow',
+  'winter', 'wren', 'zenith', 'zephyr',
+] as const;
+
+function randomUnbiasedIndex(maxExclusive: number): number {
+  if (maxExclusive <= 1) return 0;
+  const limit = Math.floor(0x1_0000_0000 / maxExclusive) * maxExclusive;
+  const buf = new Uint32Array(1);
+  while (true) {
+    crypto.getRandomValues(buf);
+    if (buf[0] < limit) {
+      return buf[0] % maxExclusive;
+    }
   }
-  const { hashB64 } = await hashPassphraseVerifier(
-    passphrase,
-    config.passphraseSaltB64
-  );
-  return hashB64 === config.passphraseVerifierHashB64;
+}
+
+/**
+ * Generates a high-entropy passphrase using WebCrypto CSPRNG with rejection sampling.
+ */
+export function generateStrongPassphrase(mode: 'passphrase' | 'password' = 'passphrase'): string {
+  if (mode === 'password') {
+    const alphabet =
+      'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+';
+    const out: string[] = [];
+    for (let i = 0; i < 24; i += 1) {
+      out.push(alphabet[randomUnbiasedIndex(alphabet.length)]);
+    }
+    return out.join('');
+  }
+
+  const words: string[] = [];
+  for (let i = 0; i < 5; i += 1) {
+    words.push(PASSPHRASE_WORDS[randomUnbiasedIndex(PASSPHRASE_WORDS.length)]);
+  }
+  const num = 10 + randomUnbiasedIndex(90);
+  return `${words.join('-')}-${num}`;
+}
+
+/**
+ * Normalizes a Crockford Base32 recovery key input (strips hyphens/spaces, uppercases,
+ * maps O->0 and I/L->1) and formats into readable 4-character hyphen groups.
+ */
+export function normalizeRecoveryKeyInput(input: string): string {
+  return input
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]/g, '')
+    .replace(/O/g, '0')
+    .replace(/[IL]/g, '1');
+}
+
+export function formatRecoveryKeyGrouped(rawOrNorm: string): string {
+  const clean = normalizeRecoveryKeyInput(rawOrNorm);
+  const groups: string[] = [];
+  for (let i = 0; i < clean.length; i += 4) {
+    groups.push(clean.slice(i, i + 4));
+  }
+  return groups.join('-');
+}
+
+/**
+ * Removes legacy v1 client-side auth entries from localStorage so no stale auth metadata persists.
+ */
+export function clearLegacyLocalAuthCache(): void {
+  try {
+    localStorage.removeItem('koban_auth_config');
+    localStorage.removeItem('koban_auth_session_unlocked');
+  } catch {
+    // ignore storage access issues
+  }
 }

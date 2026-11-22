@@ -1,14 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  AuthSettings,
   BackupEntry,
   DbInfo,
+  ExternalChangeResult,
+  KeyFileCreateResult,
   LedgerState,
   SaveResult,
+  V1MigrationPreview,
+  VaultCreateResult,
+  VaultStatus,
   WebDavCheckResult,
   WebDavConfig,
+  WebDavMergeFetchResult,
   WebDavRemoteInfo,
   WebDavSyncResult,
 } from '../types';
+import { DEFAULT_AUTH_SETTINGS } from './auth';
 
 /**
  * Browser-preview storage only (`npm run dev` without Tauri). Despite the legacy key name this is
@@ -222,17 +230,285 @@ export async function forgetWebDavSyncState(): Promise<void> {
   }
 }
 
-export async function updateVaultPassphrase(
-  passphrase: string | null,
-  currentState: LedgerState
-): Promise<DbInfo> {
+export const EXTERNAL_DB_MODIFIED_PREFIX = 'EXTERNAL_DB_MODIFIED:';
+
+export function isExternalDbModifiedError(err: unknown): boolean {
+  const msg =
+    typeof err === 'string'
+      ? err
+      : err instanceof Error
+      ? err.message
+      : String(err ?? '');
+  return msg.includes(EXTERNAL_DB_MODIFIED_PREFIX);
+}
+
+// ================= VAULT FORMAT V2 COMMANDS =================
+
+export async function getVaultStatus(): Promise<VaultStatus> {
   if (isTauriEnv()) {
-    return invoke<DbInfo>('set_vault_passphrase', {
-      passphrase,
-      currentStateJson: JSON.stringify(currentState),
-    });
+    return invoke<VaultStatus>('vault_status');
   }
-  return getDatabaseInfo();
+  const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+  return {
+    exists: Boolean(raw),
+    hasLedgerState: Boolean(raw),
+    formatVersion: 2,
+    vaultId: null,
+    unlocked: Boolean(raw),
+    needsMigration: false,
+    hasLegacyCustomPassphrase: false,
+    slots: [],
+    deviceSlotEnrolled: false,
+    windowsHelloAvailable: false,
+    requiresKeyFile: false,
+    rememberedKeyFilePath: null,
+    authSettings: { ...DEFAULT_AUTH_SETTINGS },
+    dbPath: 'Browser preview storage',
+    dbSize: raw ? new Blob([raw]).size : 0,
+    lastModified: Math.floor(Date.now() / 1000),
+    isCustomLocation: false,
+  };
+}
+
+export async function checkWindowsHelloAvailable(): Promise<boolean> {
+  if (isTauriEnv()) {
+    return invoke<boolean>('check_windows_hello_available');
+  }
+  return false;
+}
+
+export async function createVault(options: {
+  passphrase: string;
+  keyfilePath?: string | null;
+  createRecoveryKey: boolean;
+  initialState: LedgerState;
+  rememberKeyfile?: boolean;
+}): Promise<VaultCreateResult> {
+  if (isTauriEnv()) {
+    const res = await invoke<VaultCreateResult>('vault_create', {
+      passphrase: options.passphrase,
+      keyfilePath: options.keyfilePath ?? null,
+      createRecoveryKey: options.createRecoveryKey,
+      initialStateJson: JSON.stringify(options.initialState),
+      rememberKeyfile: options.rememberKeyfile ?? false,
+    });
+    purgeLegacyLedgerCopies();
+    return res;
+  }
+  await saveLedgerToDb(options.initialState);
+  return {
+    status: await getVaultStatus(),
+    recoveryKey: null,
+    ledgerJson: JSON.stringify(options.initialState),
+  };
+}
+
+export async function unlockVault(
+  passphrase: string,
+  keyfilePath?: string | null,
+  rememberKeyfile?: boolean
+): Promise<LedgerState> {
+  if (isTauriEnv()) {
+    const jsonStr = await invoke<string>('vault_unlock', {
+      passphrase,
+      keyfilePath: keyfilePath ?? null,
+      rememberKeyfile: rememberKeyfile ?? null,
+    });
+    purgeLegacyLedgerCopies();
+    return JSON.parse(jsonStr) as LedgerState;
+  }
+  const loaded = await loadLedgerFromDb();
+  if (!loaded) throw new Error('No browser preview state found.');
+  return loaded;
+}
+
+export async function unlockVaultWithRecovery(recoveryKey: string): Promise<LedgerState> {
+  if (!isTauriEnv()) {
+    throw new Error('Recovery unlock requires Koban desktop runtime.');
+  }
+  const jsonStr = await invoke<string>('vault_unlock_recovery', { recoveryKey });
+  purgeLegacyLedgerCopies();
+  return JSON.parse(jsonStr) as LedgerState;
+}
+
+export async function unlockVaultWithDevice(): Promise<LedgerState> {
+  if (!isTauriEnv()) {
+    throw new Error('Windows Hello unlock requires Koban desktop runtime.');
+  }
+  const jsonStr = await invoke<string>('vault_unlock_device');
+  purgeLegacyLedgerCopies();
+  return JSON.parse(jsonStr) as LedgerState;
+}
+
+export async function lockVault(): Promise<void> {
+  if (isTauriEnv()) {
+    await invoke('vault_lock');
+  }
+}
+
+export async function unlockV1ForMigration(
+  passphrase?: string | null
+): Promise<V1MigrationPreview> {
+  if (!isTauriEnv()) {
+    throw new Error('Legacy migration requires Koban desktop runtime.');
+  }
+  return invoke<V1MigrationPreview>('vault_unlock_v1_for_migration', {
+    passphrase: passphrase ?? null,
+  });
+}
+
+export async function migrateV1ToV2(options: {
+  v1Passphrase?: string | null;
+  newPassphrase: string;
+  keyfilePath?: string | null;
+  createRecoveryKey: boolean;
+  rememberKeyfile?: boolean;
+  currentState?: LedgerState | null;
+}): Promise<VaultCreateResult> {
+  if (!isTauriEnv()) {
+    throw new Error('Legacy migration requires Koban desktop runtime.');
+  }
+  const res = await invoke<VaultCreateResult>('vault_migrate_v1_to_v2', {
+    v1Passphrase: options.v1Passphrase ?? null,
+    newPassphrase: options.newPassphrase,
+    keyfilePath: options.keyfilePath ?? null,
+    createRecoveryKey: options.createRecoveryKey,
+    rememberKeyfile: options.rememberKeyfile ?? false,
+    currentStateJson: options.currentState ? JSON.stringify(options.currentState) : null,
+  });
+  purgeLegacyLedgerCopies();
+  return res;
+}
+
+export async function changeVaultCredentials(options: {
+  currentPassphrase?: string | null;
+  currentKeyfilePath?: string | null;
+  newPassphrase: string;
+  newKeyfilePath?: string | null;
+  rekeyDek: boolean;
+  rememberKeyfile?: boolean;
+  currentState?: LedgerState | null;
+}): Promise<VaultStatus> {
+  if (!isTauriEnv()) {
+    throw new Error('Vault credentials management requires Koban desktop runtime.');
+  }
+  return invoke<VaultStatus>('vault_change_credentials', {
+    currentPassphrase: options.currentPassphrase ?? null,
+    currentKeyfilePath: options.currentKeyfilePath ?? null,
+    newPassphrase: options.newPassphrase,
+    newKeyfilePath: options.newKeyfilePath ?? null,
+    rekeyDek: options.rekeyDek,
+    rememberKeyfile: options.rememberKeyfile ?? null,
+    currentStateJson: options.currentState ? JSON.stringify(options.currentState) : null,
+  });
+}
+
+export async function generateRecoveryKey(): Promise<string> {
+  if (!isTauriEnv()) {
+    throw new Error('Recovery key generation requires Koban desktop runtime.');
+  }
+  return invoke<string>('vault_generate_recovery_key');
+}
+
+export async function generateKeyFile(targetPath: string): Promise<KeyFileCreateResult> {
+  if (!isTauriEnv()) {
+    throw new Error('Key File generation requires Koban desktop runtime.');
+  }
+  return invoke<KeyFileCreateResult>('vault_generate_keyfile', { targetPath });
+}
+
+export async function enrollDeviceUnlock(): Promise<VaultStatus> {
+  if (!isTauriEnv()) {
+    throw new Error('Windows Hello enrollment requires Koban desktop runtime.');
+  }
+  return invoke<VaultStatus>('vault_enroll_device_unlock');
+}
+
+export async function removeDeviceUnlock(): Promise<VaultStatus> {
+  if (!isTauriEnv()) {
+    throw new Error('Removing Windows Hello requires Koban desktop runtime.');
+  }
+  return invoke<VaultStatus>('vault_remove_device_unlock');
+}
+
+export async function saveAuthSettings(settings: AuthSettings): Promise<VaultStatus> {
+  if (!isTauriEnv()) {
+    return getVaultStatus();
+  }
+  return invoke<VaultStatus>('vault_save_auth_settings', {
+    settingsJson: JSON.stringify(settings),
+  });
+}
+
+export async function setRememberedKeyfile(
+  keyfilePath: string | null
+): Promise<VaultStatus> {
+  if (!isTauriEnv()) {
+    return getVaultStatus();
+  }
+  return invoke<VaultStatus>('vault_set_remembered_keyfile', {
+    keyfilePath,
+  });
+}
+
+export async function checkExternalVaultChange(): Promise<ExternalChangeResult> {
+  if (!isTauriEnv()) {
+    return {
+      changed: false,
+      formatVersion: 2,
+      externalStateJson: null,
+      error: null,
+      lastModified: Math.floor(Date.now() / 1000),
+    };
+  }
+  return invoke<ExternalChangeResult>('vault_check_external_change');
+}
+
+export async function openDatabaseFile(path: string): Promise<VaultStatus> {
+  if (!isTauriEnv()) {
+    throw new Error('Opening another database file requires Koban desktop runtime.');
+  }
+  return invoke<VaultStatus>('vault_open_database_file', { path });
+}
+
+export async function listLegacyV1Backups(backupDir?: string | null): Promise<BackupEntry[]> {
+  if (!isTauriEnv()) return [];
+  return invoke<BackupEntry[]>('list_legacy_v1_backups', {
+    backupDir: backupDir || null,
+  });
+}
+
+export async function upgradeLegacyV1Backup(
+  path: string,
+  v1Passphrase?: string | null
+): Promise<void> {
+  if (!isTauriEnv()) return;
+  await invoke('upgrade_legacy_v1_backup', {
+    path,
+    v1Passphrase: v1Passphrase ?? null,
+  });
+}
+
+export async function deleteLegacyV1Backup(path: string): Promise<void> {
+  if (!isTauriEnv()) return;
+  await invoke('delete_legacy_v1_backup', { path });
+}
+
+export async function fetchWebDavDecryptedForMerge(
+  url: string,
+  username: string,
+  password: string,
+  filename?: string
+): Promise<WebDavMergeFetchResult> {
+  if (!isTauriEnv()) {
+    throw new Error('WebDAV merge requires Koban desktop runtime.');
+  }
+  return invoke<WebDavMergeFetchResult>('webdav_fetch_decrypted_for_merge', {
+    url,
+    username,
+    password,
+    filename: filename?.trim() || null,
+  });
 }
 
 // ================= PER-DEVICE BACKUP FOLDER =================
@@ -305,7 +581,10 @@ export async function loadLedgerFromDb(
   return null;
 }
 
-export async function saveLedgerToDb(state: LedgerState): Promise<SaveResult> {
+export async function saveLedgerToDb(
+  state: LedgerState,
+  options?: { forceOverwrite?: boolean }
+): Promise<SaveResult> {
   const jsonStr = JSON.stringify(state);
   if (!isTauriEnv()) {
     try {
@@ -323,6 +602,7 @@ export async function saveLedgerToDb(state: LedgerState): Promise<SaveResult> {
       backupDir: state.settings.backupDir || null,
       autoBackup: state.settings.autoBackup,
       maxBackups: state.settings.maxBackups || 20,
+      forceOverwrite: options?.forceOverwrite ?? false,
     });
     purgeLegacyLedgerCopies();
 
@@ -388,12 +668,14 @@ export async function listBackupFiles(backupDir: string): Promise<BackupEntry[]>
 export async function restoreFromBackupFile(
   path: string,
   passphrase?: string,
-  previewOnly = false
+  previewOnly = false,
+  keyfilePath?: string
 ): Promise<LedgerState> {
   if (isTauriEnv()) {
     const jsonStr = await invoke<string>('restore_backup_file', {
       path,
       passphrase: passphrase ?? null,
+      keyfilePath: keyfilePath ?? null,
       previewOnly,
     });
     const parsed = JSON.parse(jsonStr) as LedgerState;

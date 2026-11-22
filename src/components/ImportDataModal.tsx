@@ -20,6 +20,7 @@ import {
 } from '../utils/exportImport';
 import { formatCurrency, formatNumber } from '../utils/calculations';
 import { useI18n } from '../i18n';
+import { KeyFileSelector } from './KeyFileSelector';
 
 export type ImportKind = 'budget_sheet' | 'transactions' | 'database_backup';
 
@@ -49,6 +50,7 @@ interface ImportDataModalProps {
     kind: ImportKind;
     targetMode: LedgerMode;
     passphrase?: string;
+    keyfilePath?: string;
     browserFile?: File;
   }) => Promise<ImportPreviewData | null>;
   onCommitImport: (preview: ImportPreviewData) => Promise<void>;
@@ -73,6 +75,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   const [importKind, setImportKind] = useState<ImportKind>('budget_sheet');
   const [targetMode, setTargetMode] = useState<LedgerMode>(defaultMode);
   const [passphrase, setPassphrase] = useState('');
+  const [keyfilePath, setKeyfilePath] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [previewData, setPreviewData] = useState<ImportPreviewData | null>(
     null
@@ -188,7 +191,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
       const prepared = await onPrepareImport({
         kind: importKind,
         targetMode,
-        passphrase: passphrase.trim() || undefined,
+        passphrase: passphrase || undefined,
+        keyfilePath: keyfilePath || undefined,
         browserFile,
       });
       if (!prepared) return;
@@ -479,6 +483,14 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   onChange={(e) => setPassphrase(e.target.value)}
                   className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
                 />
+                {isTauri && (
+                  <KeyFileSelector
+                    keyfilePath={keyfilePath}
+                    onChange={setKeyfilePath}
+                    allowGenerate={false}
+                    compact
+                  />
+                )}
               </div>
             )}
 

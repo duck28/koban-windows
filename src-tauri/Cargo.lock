@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "koban"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -2077,6 +2077,9 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "ureq",
+ "windows",
+ "windows-future",
+ "zeroize",
 ]
 
 [[package]]

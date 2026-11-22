@@ -23,10 +23,11 @@ A modern, minimalist paper-and-ink budgeting and business expense application fo
   - Edit **Budget** and **Actual** amounts directly inline in a 2-column worksheet layout, or log itemized transactions that automatically roll up into your monthly actuals.
 - **📈 Reports, Breakdowns & Charts**:
   - Outflow Breakdown Donut Chart, Budget vs. Actual Horizontal Comparison Bars, 12-Month Annual Cashflow Trajectory, Top Expense Drivers, and Freelancer VAT & Tax Reserve Summary.
-- **🔒 AES-256-GCM Encrypted SQLite Database & Automatic Backups**:
-  - The ledger in `koban.db` is stored as **AES-256-GCM** ciphertext with a random 96-bit nonce per write. The key is derived from your **custom vault passphrase** and a per-vault salt.
-  - ⚠️ **Without a custom passphrase the vault uses a built-in default key and is not protected** against anyone who has a copy of the file. Set a passphrase in **Backups & Exports**. See [SECURITY.md](SECURITY.md) for the current limitations and [docs/VAULT-V2-SPEC.md](docs/VAULT-V2-SPEC.md) for the planned replacement.
-  - Automatic background backups (`koban-latest.db` + rolling `.db` snapshots) are byte copies of the vault and open with the same passphrase.
+- **🔒 Vault Format v2 Encryption, Hardware Unlock & Sync-Safe Backups**:
+  - KeePassXC-grade encryption: every vault uses a random **256-bit Data Encryption Key (DEK)** (`AES-256-GCM` with structured `AAD`) stored only in `key_slots`, protected by an **Argon2id** (`64 MiB`, `3` iterations, `4` lanes) **Master Password** (minimum 12 characters, or 8+ characters when paired with a **Composite Key File** `.key` via `HMAC-SHA256`).
+  - **160-bit Crockford Base32 Recovery Key**, hardware **Windows Hello (TPM `KeyCredentialManager` + DPAPI)** quick unlock, strict memory-clearing lock (`Lock on minimize`), and DPAPI-protected WebDAV credentials.
+  - **Cloud-Folder & WebDAV Multi-Device Sync Safety**: `DELETE` journal mode (`synchronous = FULL`), atomic staged-temp-file saves, SHA-256 external change detection, and deterministic record-level merge on sync conflicts.
+  - Automatic background backups (`koban-latest.db` + rolling `.db` snapshots) and built-in migration from legacy Vault v1 (including legacy v1 backup upgrade/cleanup). See [SECURITY.md](SECURITY.md) and [docs/VAULT-V2-SPEC.md](docs/VAULT-V2-SPEC.md).
 - **📥 Import Data & 📤 External Excel (`.xlsx`) / CSV (`.csv`) Exports**:
   - Dedicated **Import Data** workflow (`Ctrl+I`) supporting:
     - **Monthly Budget Sheets** (`.xlsx`, `.xls`, `.csv` — both 2-column and flat category layouts)

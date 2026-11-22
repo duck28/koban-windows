@@ -11,10 +11,14 @@ import {
   RotateCcw,
   HardDriveDownload,
   Lock,
+  KeyRound,
+  FileKey2,
+  Fingerprint,
 } from 'lucide-react';
-import { DbInfo, AppSettings, BackupEntry } from '../types';
+import { DbInfo, AppSettings, BackupEntry, VaultStatus } from '../types';
 import { DbLocationCard } from './DbLocationCard';
 import { WebDavSyncCard } from './WebDavSyncCard';
+import { KeyFileSelector } from './KeyFileSelector';
 import {
   getDatabaseInfo,
   listBackupFiles,
@@ -27,10 +31,15 @@ import { useI18n } from '../i18n';
 
 interface BackupsExportViewProps {
   settings: AppSettings;
+  vaultStatus: VaultStatus | null;
   onUpdateBackupSettings: (patch: Partial<AppSettings>) => void;
-  onUpdateVaultPassphrase: (passphrase: string | null) => Promise<void>;
+  onOpenSecuritySettings: () => void;
   onManualBackup: () => Promise<void>;
-  onRestoreFromPath: (path: string) => Promise<void>;
+  onRestoreFromPath: (
+    path: string,
+    passphrase?: string,
+    keyfilePath?: string
+  ) => Promise<void>;
   onExportExcel: () => Promise<void>;
   onExportBudgetCsv: () => Promise<void>;
   onExportTransactionsCsv: () => Promise<void>;
@@ -41,8 +50,9 @@ interface BackupsExportViewProps {
 
 export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
   settings,
+  vaultStatus,
   onUpdateBackupSettings,
-  onUpdateVaultPassphrase,
+  onOpenSecuritySettings,
   onManualBackup,
   onRestoreFromPath,
   onExportExcel,
@@ -56,7 +66,9 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
   const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
-  const [newPassphrase, setNewPassphrase] = useState('');
+  const [restorePassphrase, setRestorePassphrase] = useState('');
+  const [restoreKeyfilePath, setRestoreKeyfilePath] = useState<string | null>(null);
+  const [showRestoreCreds, setShowRestoreCreds] = useState(false);
 
   const refreshInfo = async () => {
     setIsLoadingBackups(true);
@@ -94,7 +106,11 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
       ['db', 'sqlite', 'json']
     );
     if (picked) {
-      await onRestoreFromPath(picked);
+      await onRestoreFromPath(
+        picked,
+        restorePassphrase || undefined,
+        restoreKeyfilePath || undefined
+      );
       await refreshInfo();
     }
   };
@@ -108,13 +124,6 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
     if (target) {
       await onExportSqliteCopy(target);
     }
-  };
-
-  const handleApplyPassphrase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await onUpdateVaultPassphrase(newPassphrase.trim() || null);
-    setNewPassphrase('');
-    await refreshInfo();
   };
 
   const formatBytes = (bytes: number) => {
@@ -185,46 +194,51 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
           </div>
         </div>
 
-        {/* Custom Vault Passphrase Row */}
-        <form
-          onSubmit={handleApplyPassphrase}
-          className="p-3.5 rounded-lg bg-app border border-line flex flex-wrap items-center justify-between gap-3"
-        >
-          <div className="flex items-center gap-2.5 min-w-[240px] flex-1">
-            <Lock className="w-4 h-4 text-indigo shrink-0" />
-            <div>
+        {/* Vault Format v2 Encryption Status Row */}
+        <div className="p-3.5 rounded-lg bg-app border border-line flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 min-w-[240px] flex-1">
+            <Lock className="w-4 h-4 text-positive shrink-0 mt-0.5" />
+            <div className="space-y-1">
               <div className="text-xs font-medium text-ink">
-                {t('backups.keyModeLabel')}{' '}
-                <span className="text-positive">
-                  {dbInfo?.has_custom_passphrase
-                    ? t('backups.keyModeCustom')
-                    : t('backups.keyModeDefault')}
-                </span>
+                {vaultStatus?.formatVersion === 2
+                  ? t('vault.badgeV2')
+                  : t('vault.badgeLegacyV1')}
               </div>
-              <p className="text-[11px] text-ink-3">
-                {dbInfo?.has_custom_passphrase
-                  ? t('backups.keyModeCustomDesc')
-                  : t('backups.keyModeDefaultDesc')}
-              </p>
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span className="px-2 py-0.5 rounded-full bg-surface border border-line text-ink-2 inline-flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5 text-positive" />
+                  <span>Master Password (Argon2id)</span>
+                </span>
+                {vaultStatus?.requiresKeyFile && (
+                  <span className="px-2 py-0.5 rounded-full bg-indigo/10 border border-indigo/25 text-indigo inline-flex items-center gap-1">
+                    <FileKey2 className="w-2.5 h-2.5" />
+                    <span>Composite Key File (.key)</span>
+                  </span>
+                )}
+                {vaultStatus?.deviceSlotEnrolled && (
+                  <span className="px-2 py-0.5 rounded-full bg-positive/10 border border-positive/25 text-positive inline-flex items-center gap-1">
+                    <Fingerprint className="w-2.5 h-2.5" />
+                    <span>Windows Hello</span>
+                  </span>
+                )}
+                {vaultStatus?.slots.some((s) => s.kind === 'recovery') && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                    <KeyRound className="w-2.5 h-2.5" />
+                    <span>Recovery Key</span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="password"
-              placeholder={t('backups.passphrasePlaceholder')}
-              value={newPassphrase}
-              onChange={(e) => setNewPassphrase(e.target.value)}
-              className="w-64 h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
-            />
-            <button
-              type="submit"
-              className="h-8 px-3 rounded-lg bg-raised border border-line text-xs text-ink hover:bg-line/70 cursor-pointer"
-            >
-              {newPassphrase.trim() ? t('backups.setPassphraseBtn') : t('backups.useDefaultKeyBtn')}
-            </button>
-          </div>
-        </form>
+          <button
+            type="button"
+            onClick={onOpenSecuritySettings}
+            className="h-8 px-3.5 rounded-lg bg-raised border border-line text-xs font-medium text-ink hover:bg-line/70 cursor-pointer"
+          >
+            Manage Credentials &amp; Keys
+          </button>
+        </div>
 
         {/* Backup Folder Configuration */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-2 border-t border-line/60 items-end">
@@ -300,7 +314,14 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             <span className="text-[11px] uppercase tracking-wider text-ink-3 font-semibold">
               {tf('backups.snapshotsListTitle', { count: backups.length })}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRestoreCreds((v) => !v)}
+                className="text-xs text-ink-2 hover:text-ink cursor-pointer"
+              >
+                {showRestoreCreds ? 'Hide backup unlock options' : 'Older / foreign backup credentials…'}
+              </button>
               <button
                 onClick={handleBrowseRestoreFile}
                 className="text-xs text-indigo hover:underline inline-flex items-center gap-1 cursor-pointer"
@@ -319,6 +340,27 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
             </div>
           </div>
 
+          {showRestoreCreds && (
+            <div className="p-3 rounded-lg bg-app border border-line space-y-2">
+              <p className="text-[11px] text-ink-2">
+                Leave empty if the backup shares your current vault key. Enter credentials only for backups protected with an older password or Key File.
+              </p>
+              <input
+                type="password"
+                value={restorePassphrase}
+                onChange={(e) => setRestorePassphrase(e.target.value)}
+                placeholder="Backup passphrase (optional)"
+                className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
+              />
+              <KeyFileSelector
+                keyfilePath={restoreKeyfilePath}
+                onChange={setRestoreKeyfilePath}
+                allowGenerate={false}
+                compact
+              />
+            </div>
+          )}
+
           {backups.length === 0 ? (
             <p className="text-xs text-ink-3 py-3">
               {settings.backupDir
@@ -333,7 +375,18 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                   className="px-3 py-2 flex items-center justify-between gap-2 text-xs hover:bg-raised/50"
                 >
                   <div className="min-w-0">
-                    <div className="text-ink font-medium truncate">{b.name}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-ink font-medium truncate">{b.name}</span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          b.format_version === 2
+                            ? 'bg-positive/12 text-positive'
+                            : 'bg-amber-500/12 text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        {b.format_version === 2 ? 'v2 Argon2id' : 'v1 Legacy'}
+                      </span>
+                    </div>
                     <div className="text-[10px] text-ink-3 tabular-nums">
                       {formatBytes(b.size)} · {formatTime(b.modified)} · AES-256-GCM
                     </div>
@@ -346,7 +399,13 @@ export const BackupsExportView: React.FC<BackupsExportViewProps> = ({
                       {t('backups.revealBtn')}
                     </button>
                     <button
-                      onClick={() => onRestoreFromPath(b.path)}
+                      onClick={() =>
+                        onRestoreFromPath(
+                          b.path,
+                          restorePassphrase || undefined,
+                          restoreKeyfilePath || undefined
+                        )
+                      }
                       className="px-2 py-1 rounded bg-ink text-on-ink text-[11px] hover:opacity-90 cursor-pointer"
                     >
                       {t('backups.restoreBtn')}

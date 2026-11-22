@@ -4,6 +4,7 @@ import {
   Clock,
   CloudDownload,
   CloudUpload,
+  GitMerge,
   Laptop,
   Loader2,
 } from 'lucide-react';
@@ -108,6 +109,19 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
           <button
             type="button"
             disabled={isResolving}
+            onClick={() => onChoose('cloud')}
+            className={`${btnBase} bg-raised border border-line text-ink hover:bg-line/60`}
+          >
+            {isResolving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <CloudDownload className="w-3.5 h-3.5 text-positive" />
+            )}
+            <span>{firstLink ? t('webdav.conflictUseCloudFirst') : t('webdav.conflictUseCloud')}</span>
+          </button>
+          <button
+            type="button"
+            disabled={isResolving}
             onClick={() => onChoose('local')}
             className={`${btnBase} bg-raised border border-line text-ink hover:bg-line/60`}
           >
@@ -121,15 +135,16 @@ export const WebDavConflictDialog: React.FC<WebDavConflictDialogProps> = ({
           <button
             type="button"
             disabled={isResolving}
-            onClick={() => onChoose('cloud')}
+            onClick={() => onChoose('merge')}
+            title={t('merge.webdavMergeDesc')}
             className={`${btnBase} bg-ink text-on-ink font-medium hover:opacity-90 shadow-xs`}
           >
             {isResolving ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
-              <CloudDownload className="w-3.5 h-3.5" />
+              <GitMerge className="w-3.5 h-3.5" />
             )}
-            <span>{firstLink ? t('webdav.conflictUseCloudFirst') : t('webdav.conflictUseCloud')}</span>
+            <span>{t('merge.webdavMergeBtn')}</span>
           </button>
         </div>
       </div>

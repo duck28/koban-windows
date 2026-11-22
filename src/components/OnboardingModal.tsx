@@ -23,22 +23,24 @@ import {
   CheckCircle2,
   Cloud,
   AlertTriangle,
+  Eye,
+  EyeOff,
+  KeyRound,
   X,
 } from 'lucide-react';
 import {
   AccountLiquidityClass,
   AccountType,
   AppSettings,
-  AuthConfig,
   FinancialAccount,
   LedgerMode,
   MonthCopyScope,
   ProfileSetupMode,
+  VaultStatus,
 } from '../types';
-import {
-  hashPassphraseVerifier,
-  registerPasskeyOrWindowsHello,
-} from '../utils/auth';
+import { MIN_VAULT_PASSPHRASE_LENGTH } from '../utils/auth';
+import { KeyFileSelector } from './KeyFileSelector';
+import { PassphraseStrengthBar } from './PassphraseStrengthBar';
 import {
   ACCOUNT_TYPE_META,
   CatalogGroupDef,
@@ -58,9 +60,7 @@ interface OnboardingModalProps {
   isOpen: boolean;
   currentSettings: AppSettings;
   existingAccounts: FinancialAccount[];
-  authConfig: AuthConfig;
-  hasCustomDbPassphrase?: boolean;
-  onUpdateAuthConfig: (next: AuthConfig) => void;
+  vaultStatus: VaultStatus | null;
   onUpdateLanguage?: (code: string) => void;
   onCompleteSetup: (options: {
     setupMode: ProfileSetupMode;
@@ -76,11 +76,18 @@ interface OnboardingModalProps {
     customItemsByGroup: Record<string, string[]>;
     accounts?: FinancialAccount[];
     skipAccountsSetup: boolean;
+    ownerDisplayName: string;
     vaultPassphrase?: string;
+    keyfilePath?: string | null;
+    rememberKeyfile?: boolean;
+    createRecoveryKey: boolean;
+    enrollWindowsHello: boolean;
+    autoLockMinutes: number;
+    lockOnMinimize: boolean;
     confirmBeforeMonthCopy: boolean;
     monthCopyScope: MonthCopyScope;
     autoPromptCopyOnEmptyMonth: boolean;
-  }) => void;
+  }) => Promise<void> | void;
   onOpenImportModal: () => void;
   /** New device: open an existing vault from WebDAV. */
   onOpenWebDavVault?: () => void;
@@ -93,9 +100,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   isOpen,
   currentSettings,
   existingAccounts,
-  authConfig,
-  hasCustomDbPassphrase = false,
-  onUpdateAuthConfig,
+  vaultStatus,
   onUpdateLanguage,
   onCompleteSetup,
   onOpenImportModal,
@@ -148,21 +153,31 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       : createDefaultOnboardingAccounts(currentSettings.setupMode || 'both')
   );
 
-  // Step 4 state: Encrypted Backup, Login / Passkeys & Behavioral Preferences
+  // Step 4 state: Vault Format v2 Encryption, Key File, Quick Unlock & Lock Policy
   const [backupDir, setBackupDir] = useState(currentSettings.backupDir || '');
   const [autoBackup, setAutoBackup] = useState(
     currentSettings.backupDir ? currentSettings.autoBackup : true
   );
   const [vaultPassphrase, setVaultPassphrase] = useState('');
   const [vaultPassphraseConfirm, setVaultPassphraseConfirm] = useState('');
+  const [showPassphrase, setShowPassphrase] = useState(false);
+  const [keyfilePath, setKeyfilePath] = useState<string | null>(null);
+  const [rememberKeyfile, setRememberKeyfile] = useState(false);
+  const [createRecoveryKey, setCreateRecoveryKey] = useState(true);
   const [userDisplayName, setUserDisplayName] = useState(
-    authConfig.userDisplayName || 'Koban Owner'
+    currentSettings.ownerDisplayName || 'Koban Owner'
   );
-  const [requireLoginOnStartup, setRequireLoginOnStartup] = useState(
-    authConfig.enabled ?? true
+  const [enrollWindowsHello, setEnrollWindowsHello] = useState(
+    Boolean(vaultStatus?.deviceSlotEnrolled || vaultStatus?.windowsHelloAvailable)
   );
-  const [passkeyStatusMsg, setPasskeyStatusMsg] = useState<string | null>(null);
-  const [isEnrollingPasskey, setIsEnrollingPasskey] = useState(false);
+  const [autoLockMinutes, setAutoLockMinutes] = useState(
+    vaultStatus?.authSettings.autoLockMinutes ?? 15
+  );
+  const [lockOnMinimize, setLockOnMinimize] = useState(
+    vaultStatus?.authSettings.lockOnMinimize ?? false
+  );
+  const [keyfileStatusMsg, setKeyfileStatusMsg] = useState<string | null>(null);
+  const [isCompleting, setIsCompleting] = useState(false);
   const [confirmBeforeMonthCopy, setConfirmBeforeMonthCopy] = useState(
     currentSettings.confirmBeforeMonthCopy ?? true
   );
@@ -330,109 +345,66 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     }
   };
 
-  const requiresCustomPassphrase = !hasCustomDbPassphrase;
-  const trimmedPassphrase = vaultPassphrase.trim();
-  const trimmedPassphraseConfirm = vaultPassphraseConfirm.trim();
+  const alreadyConfiguredV2 = Boolean(
+    vaultStatus?.exists && vaultStatus?.formatVersion === 2 && vaultStatus?.unlocked
+  );
+  const requiresCustomPassphrase = !alreadyConfiguredV2;
 
   const passphraseError: string | null = (() => {
-    if (requiresCustomPassphrase) {
-      if (!trimmedPassphrase) {
-        return t('onboarding.s4.errRequired');
-      }
-      if (trimmedPassphrase.length < 4) {
-        return t('onboarding.s4.errMinLength');
-      }
-      if (trimmedPassphrase !== trimmedPassphraseConfirm) {
-        return t('onboarding.s4.errMismatch');
-      }
+    const hasInput = vaultPassphrase.length > 0 || vaultPassphraseConfirm.length > 0;
+    if (!requiresCustomPassphrase && !hasInput) {
       return null;
     }
-    if (trimmedPassphrase || trimmedPassphraseConfirm) {
-      if (trimmedPassphrase.length < 4) {
-        return t('onboarding.s4.errMinLength');
-      }
-      if (trimmedPassphrase !== trimmedPassphraseConfirm) {
-        return t('onboarding.s4.errMismatch');
-      }
+    if (!keyfilePath && vaultPassphrase.length < MIN_VAULT_PASSPHRASE_LENGTH) {
+      return `Master Password must be at least ${MIN_VAULT_PASSPHRASE_LENGTH} characters.`;
+    }
+    if (keyfilePath && !vaultPassphrase) {
+      return 'Enter a Master Password alongside your Key File.';
+    }
+    if (vaultPassphrase !== vaultPassphrase.trim()) {
+      return 'Master Password cannot start or end with spaces.';
+    }
+    if (vaultPassphrase !== vaultPassphraseConfirm) {
+      return t('onboarding.s4.errMismatch');
     }
     return null;
   })();
 
   const isPassphraseValid = passphraseError === null;
 
-  const handleEnrollPasskeyInOnboarding = async () => {
-    if (!isPassphraseValid) return;
-    setIsEnrollingPasskey(true);
-    setPasskeyStatusMsg(null);
-    try {
-      const cleanName = userDisplayName.trim() || 'Koban Owner';
-      const cred = await registerPasskeyOrWindowsHello({
-        userDisplayName: cleanName,
-        credentialLabel: 'Windows Hello / Passkey',
-        preferMode: 'auto',
-      });
-      const nextAuth: AuthConfig = {
-        ...authConfig,
-        enabled: true,
-        userDisplayName: cleanName,
-        passkeys: [...authConfig.passkeys, cred],
-      };
-      setRequireLoginOnStartup(true);
-      onUpdateAuthConfig(nextAuth);
-      setPasskeyStatusMsg(`Enrolled "${cred.name}" successfully.`);
-    } catch (err) {
-      setPasskeyStatusMsg(
-        err instanceof Error
-          ? `Passkey prompt: ${err.message}`
-          : 'Passkey registration canceled.'
-      );
-    } finally {
-      setIsEnrollingPasskey(false);
-    }
-  };
-
   const handleFinish = async () => {
-    if (!isPassphraseValid) return;
-    let nextAuth: AuthConfig = {
-      ...authConfig,
-      enabled:
-        requireLoginOnStartup ||
-        authConfig.passkeys.length > 0 ||
-        Boolean(vaultPassphrase.trim()),
-      userDisplayName: userDisplayName.trim() || 'Koban Owner',
-    };
-    if (vaultPassphrase.trim()) {
-      const { saltB64, hashB64 } = await hashPassphraseVerifier(
-        vaultPassphrase.trim()
-      );
-      nextAuth = {
-        ...nextAuth,
-        hasMasterPassphrase: true,
-        passphraseSaltB64: saltB64,
-        passphraseVerifierHashB64: hashB64,
-      };
+    if (!isPassphraseValid || isCompleting) return;
+    setIsCompleting(true);
+    try {
+      await onCompleteSetup({
+        setupMode,
+        currency,
+        backupDir,
+        autoBackup,
+        defaultVatRate,
+        taxReserveRate,
+        applyCategorySelection,
+        selectedHomeIds,
+        selectedFreelancerIds,
+        recurringCategoryIds,
+        customItemsByGroup,
+        accounts: skipAccountsSetup ? undefined : draftAccounts,
+        skipAccountsSetup,
+        ownerDisplayName: userDisplayName.trim() || 'Koban Owner',
+        vaultPassphrase: vaultPassphrase || undefined,
+        keyfilePath: keyfilePath ?? null,
+        rememberKeyfile: Boolean(keyfilePath && rememberKeyfile),
+        createRecoveryKey,
+        enrollWindowsHello,
+        autoLockMinutes,
+        lockOnMinimize,
+        confirmBeforeMonthCopy,
+        monthCopyScope,
+        autoPromptCopyOnEmptyMonth,
+      });
+    } finally {
+      setIsCompleting(false);
     }
-    onUpdateAuthConfig(nextAuth);
-
-    onCompleteSetup({
-      setupMode,
-      currency,
-      backupDir,
-      autoBackup,
-      defaultVatRate,
-      taxReserveRate,
-      applyCategorySelection,
-      selectedHomeIds,
-      selectedFreelancerIds,
-      recurringCategoryIds,
-      customItemsByGroup,
-      accounts: skipAccountsSetup ? undefined : draftAccounts,
-      skipAccountsSetup,
-      vaultPassphrase: vaultPassphrase.trim() || undefined,
-      confirmBeforeMonthCopy,
-      monthCopyScope,
-      autoPromptCopyOnEmptyMonth,
-    });
   };
 
   // Compute live preview totals for Step 3
@@ -1319,21 +1291,28 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   <div className="relative">
                     <Lock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
                     <input
-                      type="password"
+                      type={showPassphrase ? 'text' : 'password'}
                       placeholder={
                         requiresCustomPassphrase
-                          ? t('onboarding.s4.passphrasePlaceholderReq')
-                          : t('onboarding.s4.passphrasePlaceholderOpt')
+                          ? `Master Password (min ${MIN_VAULT_PASSPHRASE_LENGTH} chars)`
+                          : 'Leave empty to keep current password'
                       }
                       value={vaultPassphrase}
                       onChange={(e) => setVaultPassphrase(e.target.value)}
-                      className="w-full h-9 pl-8 pr-3 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
+                      className="w-full h-9 pl-8 pr-8 rounded-lg bg-surface border border-line text-xs text-ink placeholder:text-ink-3 focus:outline-none"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassphrase((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink cursor-pointer"
+                    >
+                      {showPassphrase ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
                   <div className="relative">
                     <Lock className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
                     <input
-                      type="password"
+                      type={showPassphrase ? 'text' : 'password'}
                       placeholder={
                         requiresCustomPassphrase
                           ? t('onboarding.s4.confirmPlaceholderReq')
@@ -1346,10 +1325,49 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   </div>
                 </div>
 
-                {passphraseError && (trimmedPassphrase.length > 0 || trimmedPassphraseConfirm.length > 0 || requiresCustomPassphrase) && (
-                  <p className={`text-[11px] ${trimmedPassphrase.length === 0 && trimmedPassphraseConfirm.length === 0 ? 'text-ink-2' : 'text-accent'}`}>
+                {(requiresCustomPassphrase || vaultPassphrase.length > 0) && (
+                  <PassphraseStrengthBar
+                    passphrase={vaultPassphrase}
+                    onGenerate={(g) => {
+                      setVaultPassphrase(g);
+                      setVaultPassphraseConfirm(g);
+                      setShowPassphrase(true);
+                    }}
+                  />
+                )}
+
+                {passphraseError && (vaultPassphrase.length > 0 || vaultPassphraseConfirm.length > 0 || requiresCustomPassphrase) && (
+                  <p className={`text-[11px] ${vaultPassphrase.length === 0 && vaultPassphraseConfirm.length === 0 ? 'text-ink-2' : 'text-accent'}`}>
                     {passphraseError}
                   </p>
+                )}
+
+                {!alreadyConfiguredV2 && (
+                  <>
+                    <KeyFileSelector
+                      keyfilePath={keyfilePath}
+                      onChange={setKeyfilePath}
+                      allowGenerate
+                      rememberChecked={rememberKeyfile}
+                      onRememberChange={setRememberKeyfile}
+                      onStatusMessage={setKeyfileStatusMsg}
+                    />
+                    {keyfileStatusMsg && (
+                      <p className="text-[11px] text-positive">{keyfileStatusMsg}</p>
+                    )}
+                    <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-surface border border-line text-xs text-ink-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={createRecoveryKey}
+                        onChange={(e) => setCreateRecoveryKey(e.target.checked)}
+                        className="mt-0.5 rounded border-line"
+                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        <KeyRound className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span>Generate a 160-bit emergency Recovery Key (recommended)</span>
+                      </span>
+                    </label>
+                  </>
                 )}
 
                 <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-warning/10 border border-warning/30 text-[11px] text-ink">
@@ -1381,7 +1399,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 </div>
               </div>
 
-              {/* 2. Login & Passkey / Windows Hello Protection */}
+              {/* 2. Quick Unlock & Auto-Lock Policy */}
               <div className="p-4 rounded-xl bg-app border border-line space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -1389,28 +1407,17 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                     <span className="text-xs font-medium text-ink">
                       {t('onboarding.s4.loginTitle')}
                     </span>
-                    {authConfig.passkeys.length > 0 && (
+                    {vaultStatus?.deviceSlotEnrolled && (
                       <span className="px-2 py-0.5 rounded-full bg-positive/12 border border-positive/30 text-positive text-[10px] font-medium inline-flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3" />
-                        <span>{authConfig.passkeys.length} {t('onboarding.s4.passkeyEnrolled')}</span>
+                        <span>Windows Hello Enrolled</span>
                       </span>
                     )}
                   </div>
-                  <label className="flex items-center gap-2 text-xs text-ink-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={requireLoginOnStartup}
-                      onChange={(e) =>
-                        setRequireLoginOnStartup(e.target.checked)
-                      }
-                      className="rounded border-line"
-                    />
-                    <span>{t('onboarding.s4.requireLoginStartup')}</span>
-                  </label>
                 </div>
 
-                <div className="flex flex-wrap items-end gap-2.5">
-                  <div className="flex-[1_1_180px] min-w-[160px]">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  <div>
                     <label className="block text-[11px] text-ink-2 mb-1">
                       {t('onboarding.s4.ownerNameLabel')}
                     </label>
@@ -1422,31 +1429,46 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       className="w-full h-9 px-3 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
                     />
                   </div>
-
-                  <button
-                    type="button"
-                    disabled={isEnrollingPasskey || !isPassphraseValid}
-                    onClick={handleEnrollPasskeyInOnboarding}
-                    className="h-9 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center gap-2 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Fingerprint className="w-3.5 h-3.5" />
-                    <span>
-                      {authConfig.passkeys.length > 0
-                        ? t('onboarding.s4.addAnotherPasskeyBtn')
-                        : t('onboarding.s4.enrollBtn')}
-                    </span>
-                  </button>
+                  <div>
+                    <label className="block text-[11px] text-ink-2 mb-1">
+                      {t('vault.autoLockLabel')}
+                    </label>
+                    <select
+                      value={autoLockMinutes}
+                      onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
+                      className="w-full h-9 px-3 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
+                    >
+                      <option value={1}>1 min</option>
+                      <option value={5}>5 min</option>
+                      <option value={15}>15 min</option>
+                      <option value={30}>30 min</option>
+                      <option value={60}>60 min</option>
+                      <option value={0}>Never</option>
+                    </select>
+                  </div>
                 </div>
 
-                {!isPassphraseValid && (
-                  <p className="text-[11px] text-ink-3">
-                    {t('onboarding.s4.passkeyGateHint')}
-                  </p>
+                {vaultStatus?.windowsHelloAvailable && !vaultStatus?.deviceSlotEnrolled && (
+                  <label className="flex items-center gap-2.5 text-xs text-ink-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enrollWindowsHello}
+                      onChange={(e) => setEnrollWindowsHello(e.target.checked)}
+                      className="rounded border-line"
+                    />
+                    <span>{t('vault.windowsHelloEnroll')} (protected by TPM &amp; DPAPI)</span>
+                  </label>
                 )}
 
-                {passkeyStatusMsg && (
-                  <p className="text-[11px] text-indigo">{passkeyStatusMsg}</p>
-                )}
+                <label className="flex items-center gap-2.5 text-xs text-ink-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={lockOnMinimize}
+                    onChange={(e) => setLockOnMinimize(e.target.checked)}
+                    className="rounded border-line"
+                  />
+                  <span>{t('vault.lockOnMinimize')}</span>
+                </label>
               </div>
 
               {/* Behavioral Options */}
@@ -1584,7 +1606,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             ) : (
               <button
                 type="button"
-                disabled={!isPassphraseValid}
+                disabled={!isPassphraseValid || isCompleting}
                 onClick={handleFinish}
                 className="h-9 px-5 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >

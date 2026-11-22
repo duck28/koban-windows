@@ -1,6 +1,6 @@
 [package]
 name = "koban"
-version = "0.3.0"
+version = "0.4.0"
 description = "Koban for Windows: Minimalist Home & Freelancer Budgeting"
 authors = ["Roland Matuz"]
 license = "Apache-2.0"
@@ -25,6 +25,23 @@ aes-gcm = "0.11"
 sha2 = "0.11"
 getrandom = "0.2"
 ureq = { version = "2.10", features = ["tls"] }
+zeroize = "1.9"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-future = "0.3"
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Security_Credentials",
+    "Security_Credentials_UI",
+    "Security_Cryptography",
+    "Storage_Streams",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security_Cryptography",
+    "Win32_System_Com",
+    "Win32_System_Memory",
+    "Win32_System_WinRT",
+] }
 
 [profile.release]
 codegen-units = 1

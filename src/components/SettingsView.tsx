@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   SlidersHorizontal,
   CopyCheck,
@@ -10,13 +10,7 @@ import {
   ShieldCheck,
   Sparkles,
   FolderOpen,
-  Fingerprint,
-  KeyRound,
   Lock,
-  Laptop,
-  Trash2,
-  CheckCircle2,
-  Plus,
   Palette,
   Check,
   RefreshCw,
@@ -25,10 +19,11 @@ import {
 } from 'lucide-react';
 import {
   AppSettings,
-  AuthConfig,
+  LedgerState,
   MonthCopyScope,
   ProfileSetupMode,
   ThemePalette,
+  VaultStatus,
 } from '../types';
 import { pickFolderDialog } from '../utils/storage';
 import {
@@ -41,17 +36,15 @@ import { useI18n } from '../i18n';
 import { LanguageSelect } from './LanguageSelect';
 import { DbLocationCard } from './DbLocationCard';
 import { WebDavSyncCard } from './WebDavSyncCard';
-import {
-  checkBiometricPasskeySupport,
-  hashPassphraseVerifier,
-  registerPasskeyOrWindowsHello,
-} from '../utils/auth';
+import { VaultSecuritySettingsSection } from './VaultSecuritySettingsSection';
 
 interface SettingsViewProps {
   settings: AppSettings;
-  authConfig: AuthConfig;
+  ledgerState: LedgerState;
+  vaultStatus: VaultStatus | null;
   onUpdateSettings: (patch: Partial<AppSettings>) => void;
-  onUpdateAuthConfig: (next: AuthConfig) => void;
+  onVaultStatusUpdated: (next: VaultStatus) => void;
+  onShowRecoveryKey: (recoveryKey: string) => void;
   onLockVaultNow: () => void;
   onOpenSetupWizard: () => void;
   onOpenBackupsTab: () => void;
@@ -64,9 +57,11 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings,
-  authConfig,
+  ledgerState,
+  vaultStatus,
   onUpdateSettings,
-  onUpdateAuthConfig,
+  onVaultStatusUpdated,
+  onShowRecoveryKey,
   onLockVaultNow,
   onOpenSetupWizard,
   onOpenBackupsTab,
@@ -76,79 +71,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   updateCheckError = null,
   onCheckForUpdates,
 }) => {
-  const { t, tf, intlLocale } = useI18n();
-  const [newCredentialLabel, setNewCredentialLabel] = useState('');
-  const [newPassphrase, setNewPassphrase] = useState('');
-  const [authStatusMsg, setAuthStatusMsg] = useState<string | null>(null);
-  const [isRegisteringPasskey, setIsRegisteringPasskey] = useState(false);
-  const [windowsHelloNativeAvailable, setWindowsHelloNativeAvailable] =
-    useState(false);
-
-  useEffect(() => {
-    checkBiometricPasskeySupport().then((info) => {
-      setWindowsHelloNativeAvailable(info.windowsHelloNativeAvailable);
-    });
-  }, []);
-
-  const handleRegisterPasskey = async (
-    preferMode: 'auto' | 'webauthn' | 'windows_hello'
-  ) => {
-    setIsRegisteringPasskey(true);
-    setAuthStatusMsg(null);
-    try {
-      const cred = await registerPasskeyOrWindowsHello({
-        userDisplayName: authConfig.userDisplayName || 'Koban Owner',
-        credentialLabel:
-          newCredentialLabel.trim() ||
-          (preferMode === 'windows_hello'
-            ? t('settings.login.credPlaceholder')
-            : 'Passkey / Windows Hello'),
-        preferMode,
-      });
-      onUpdateAuthConfig({
-        ...authConfig,
-        enabled: true,
-        passkeys: [...authConfig.passkeys, cred],
-      });
-      setAuthStatusMsg(tf('settings.login.enrollSuccess', { name: cred.name }));
-    } catch (err) {
-      setAuthStatusMsg(
-        err instanceof Error
-          ? err.message
-          : t('settings.login.enrollFailed')
-      );
-    } finally {
-      setIsRegisteringPasskey(false);
-    }
-  };
-
-  const handleRemovePasskey = (id: string) => {
-    const remaining = authConfig.passkeys.filter((p) => p.id !== id);
-    onUpdateAuthConfig({
-      ...authConfig,
-      passkeys: remaining,
-    });
-    setAuthStatusMsg(t('settings.login.removedPasskey'));
-  };
-
-  const handleSetMasterPassphrase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newPassphrase.trim();
-    if (trimmed.length < 4) {
-      setAuthStatusMsg(t('settings.login.errPassphraseShort'));
-      return;
-    }
-    const { saltB64, hashB64 } = await hashPassphraseVerifier(trimmed);
-    onUpdateAuthConfig({
-      ...authConfig,
-      enabled: true,
-      hasMasterPassphrase: true,
-      passphraseSaltB64: saltB64,
-      passphraseVerifierHashB64: hashB64,
-    });
-    setNewPassphrase('');
-    setAuthStatusMsg(t('settings.login.updatedPassphraseMsg'));
-  };
+  const { t } = useI18n();
 
   const handleChooseBackupFolder = async () => {
     const picked = await pickFolderDialog(
@@ -213,269 +136,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </section>
 
-      {/* 0. Login, Passkeys & Windows Hello Authentication */}
-      <section className="p-5 rounded-xl bg-surface border border-line space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line">
-          <div className="flex items-center gap-2">
-            <Fingerprint className="w-4 h-4 text-indigo" />
-            <div>
-              <h2 className="text-sm font-medium text-ink">
-                {t('settings.login.title')}
-              </h2>
-              <p className="text-xs text-ink-2">
-                {t('settings.login.desc')}
-              </p>
-            </div>
-          </div>
-
-          <span
-            className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium inline-flex items-center gap-1 border ${
-              authConfig.enabled
-                ? 'bg-positive/12 border-positive/30 text-positive'
-                : 'bg-raised border-line text-ink-3'
-            }`}
-          >
-            <CheckCircle2 className="w-3 h-3" />
-            <span>
-              {authConfig.enabled ? t('settings.login.enabled') : t('settings.login.disabled')}
-            </span>
-          </span>
-        </div>
-
-        {authStatusMsg && (
-          <div className="p-2.5 rounded-lg bg-indigo/10 border border-indigo/25 text-xs text-indigo">
-            {authStatusMsg}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
-            <div>
-              <div className="text-xs font-medium text-ink">
-                {t('settings.login.require')}
-              </div>
-              <p className="text-[11px] text-ink-2 mt-0.5">
-                {t('settings.login.requireDesc')}
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={authConfig.enabled}
-              onChange={(e) =>
-                onUpdateAuthConfig({
-                  ...authConfig,
-                  enabled: e.target.checked,
-                })
-              }
-              className="mt-0.5 rounded border-line"
-            />
-          </label>
-
-          <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer">
-            <div>
-              <div className="text-xs font-medium text-ink">
-                {t('settings.login.autoPrompt')}
-              </div>
-              <p className="text-[11px] text-ink-2 mt-0.5">
-                {t('settings.login.autoPromptDesc')}
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={authConfig.autoPromptPasskeyOnLaunch}
-              onChange={(e) =>
-                onUpdateAuthConfig({
-                  ...authConfig,
-                  autoPromptPasskeyOnLaunch: e.target.checked,
-                })
-              }
-              className="mt-0.5 rounded border-line"
-            />
-          </label>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="p-3 rounded-lg bg-app border border-line">
-            <label className="block text-[11px] font-medium text-ink-2 mb-1">
-              {t('settings.login.ownerName')}
-            </label>
-            <input
-              type="text"
-              value={authConfig.userDisplayName}
-              onChange={(e) =>
-                onUpdateAuthConfig({
-                  ...authConfig,
-                  userDisplayName: e.target.value,
-                })
-              }
-              placeholder={t('settings.login.ownerPlaceholder')}
-              className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
-            />
-          </div>
-
-          <div className="p-3 rounded-lg bg-app border border-line">
-            <label className="block text-[11px] font-medium text-ink-2 mb-1">
-              {t('settings.login.autoLock')}
-            </label>
-            <select
-              value={authConfig.autoLockMinutes}
-              onChange={(e) =>
-                onUpdateAuthConfig({
-                  ...authConfig,
-                  autoLockMinutes: parseInt(e.target.value, 10) || 0,
-                })
-              }
-              className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
-            >
-              <option value={0}>{t('settings.login.autoLockNever')}</option>
-              <option value={5}>{t('settings.login.autoLock5')}</option>
-              <option value={15}>{t('settings.login.autoLock15')}</option>
-              <option value={30}>{t('settings.login.autoLock30')}</option>
-              <option value={60}>{t('settings.login.autoLock60')}</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Registered Passkeys & Windows Hello */}
-        <div className="p-3.5 rounded-xl bg-app border border-line space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-xs font-medium text-ink">
-                {tf('settings.login.enrolledTitle', { count: authConfig.passkeys.length })}
-              </div>
-              <p className="text-[11px] text-ink-2">
-                {t('settings.login.enrolledDesc')}
-              </p>
-            </div>
-          </div>
-
-          {authConfig.passkeys.length > 0 ? (
-            <div className="space-y-1.5">
-              {authConfig.passkeys.map((pk) => (
-                <div
-                  key={pk.id}
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface border border-line text-xs"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Laptop className="w-3.5 h-3.5 text-indigo shrink-0" />
-                    <div>
-                      <div className="font-medium text-ink">{pk.name}</div>
-                      <div className="text-[10px] text-ink-3">
-                        {pk.kind === 'windows_hello_native'
-                          ? t('settings.login.nativeVerifier')
-                          : t('settings.login.webauthnVerifier')}{' '}
-                        • {t('settings.login.addedPrefix')}{' '}
-                        {new Date(pk.createdAt * 1000).toLocaleDateString(intlLocale)}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemovePasskey(pk.id)}
-                    className="h-7 px-2 rounded-md text-ink-3 hover:text-negative hover:bg-negative/10 inline-flex items-center gap-1 text-[11px] cursor-pointer"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>{t('common.remove')}</span>
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-ink-3 py-1">
-              {t('settings.login.noneEnrolled')}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-end gap-2 pt-1">
-            <div className="flex-[1_1_200px] min-w-[160px]">
-              <label className="block text-[10px] text-ink-3 mb-1">
-                {t('settings.login.credLabel')}
-              </label>
-              <input
-                type="text"
-                value={newCredentialLabel}
-                onChange={(e) => setNewCredentialLabel(e.target.value)}
-                placeholder={t('settings.login.credPlaceholder')}
-                className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
-              />
-            </div>
-
-            <button
-              type="button"
-              disabled={isRegisteringPasskey}
-              onClick={() => handleRegisterPasskey('auto')}
-              className="h-8 px-3.5 rounded-lg bg-ink text-app text-xs font-medium inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{t('settings.login.enrollBtn')}</span>
-            </button>
-
-            {windowsHelloNativeAvailable && (
-              <button
-                type="button"
-                disabled={isRegisteringPasskey}
-                onClick={() => handleRegisterPasskey('windows_hello')}
-                className="h-8 px-3 rounded-lg bg-surface border border-line text-xs text-ink hover:bg-raised inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <Laptop className="w-3.5 h-3.5 text-indigo" />
-                <span>{t('settings.login.enrollNativeBtn')}</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Backup Master Passphrase / PIN */}
-        <form
-          onSubmit={handleSetMasterPassphrase}
-          className="p-3.5 rounded-xl bg-app border border-line flex flex-wrap items-end gap-2.5"
-        >
-          <div className="flex-[1_1_240px] min-w-[180px]">
-            <label className="block text-[11px] font-medium text-ink-2 mb-1">
-              {authConfig.hasMasterPassphrase
-                ? t('settings.login.updatePassphraseLabel')
-                : t('settings.login.setPassphraseLabel')}
-            </label>
-            <div className="relative">
-              <KeyRound className="w-3.5 h-3.5 text-ink-3 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="password"
-                value={newPassphrase}
-                onChange={(e) => setNewPassphrase(e.target.value)}
-                placeholder={t('settings.login.passphrasePlaceholder')}
-                className="w-full h-8 pl-8 pr-3 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!newPassphrase.trim()}
-            className="h-8 px-3.5 rounded-lg bg-surface border border-line text-xs font-medium text-ink hover:bg-raised transition-colors cursor-pointer disabled:opacity-40"
-          >
-            {authConfig.hasMasterPassphrase
-              ? t('settings.login.updatePassphraseBtn')
-              : t('settings.login.savePassphraseBtn')}
-          </button>
-
-          {authConfig.hasMasterPassphrase && (
-            <button
-              type="button"
-              onClick={() => {
-                onUpdateAuthConfig({
-                  ...authConfig,
-                  hasMasterPassphrase: false,
-                  passphraseSaltB64: undefined,
-                  passphraseVerifierHashB64: undefined,
-                });
-                setAuthStatusMsg(t('settings.login.removedPassphraseMsg'));
-              }}
-              className="h-8 px-3 rounded-lg text-xs text-ink-3 hover:text-negative hover:bg-negative/10 cursor-pointer"
-            >
-              {t('settings.login.removePassphraseBtn')}
-            </button>
-          )}
-        </form>
-      </section>
+      {/* 0. Vault Format v2 Security & Credentials */}
+      <VaultSecuritySettingsSection
+        settings={settings}
+        ledgerState={ledgerState}
+        vaultStatus={vaultStatus}
+        onUpdateSettings={onUpdateSettings}
+        onVaultStatusUpdated={onVaultStatusUpdated}
+        onShowRecoveryKey={onShowRecoveryKey}
+        onLockVaultNow={onLockVaultNow}
+      />
 
       {/* 1. Month-to-Month Rollover & Copy Behavior */}
       <section className="p-5 rounded-xl bg-surface border border-line space-y-4">

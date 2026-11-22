@@ -201,6 +201,8 @@ export interface AppSettings {
   confirmAndPreviewBeforeImport?: boolean;
   /** UI language code (e.g. 'en', 'de', 'hu', 'ja') */
   language?: string;
+  /** Vault owner display name stored safely inside ledger settings */
+  ownerDisplayName?: string;
   /** Automatically check GitHub Releases for app updates on startup */
   autoCheckUpdates?: boolean;
   /** WebDAV Cloud Sync Configuration (Nextcloud, ownCloud, mailbox.org, NAS) */
@@ -305,6 +307,7 @@ export interface DbInfo {
   cipher: string;
   encrypted_records: number;
   has_custom_passphrase: boolean;
+  format_version?: number;
   is_custom_location?: boolean;
 }
 
@@ -313,27 +316,86 @@ export interface BackupEntry {
   path: string;
   size: number;
   modified: number;
+  format_version?: number;
 }
 
-export interface PasskeyCredentialRecord {
+export interface KeySlotSummary {
   id: string;
-  name: string;
-  kind: 'webauthn_passkey' | 'windows_hello_native';
+  kind: string;
+  label: string;
+  keyfileFingerprint?: string | null;
   createdAt: number;
-  lastUsedAt?: number;
-  publicKeyB64?: string;
-  wrappedVaultSecret?: string;
 }
 
-export interface AuthConfig {
-  enabled: boolean;
-  userDisplayName: string;
-  autoPromptPasskeyOnLaunch: boolean;
+export interface AuthSettings {
+  autoPromptDevice: boolean;
   autoLockMinutes: number;
-  passkeys: PasskeyCredentialRecord[];
-  hasMasterPassphrase: boolean;
-  passphraseSaltB64?: string;
-  passphraseVerifierHashB64?: string;
+  lockOnMinimize: boolean;
+}
+
+export interface VaultStatus {
+  exists: boolean;
+  hasLedgerState: boolean;
+  formatVersion: number;
+  vaultId?: string | null;
+  unlocked: boolean;
+  needsMigration: boolean;
+  hasLegacyCustomPassphrase: boolean;
+  slots: KeySlotSummary[];
+  deviceSlotEnrolled: boolean;
+  windowsHelloAvailable: boolean;
+  requiresKeyFile: boolean;
+  rememberedKeyFilePath?: string | null;
+  authSettings: AuthSettings;
+  dbPath: string;
+  dbSize: number;
+  lastModified: number;
+  isCustomLocation: boolean;
+}
+
+export interface VaultCreateResult {
+  status: VaultStatus;
+  recoveryKey?: string | null;
+  ledgerJson?: string | null;
+}
+
+export interface KeyFileCreateResult {
+  path: string;
+  fingerprint: string;
+}
+
+export interface ExternalChangeResult {
+  changed: boolean;
+  formatVersion: number;
+  externalStateJson?: string | null;
+  error?: string | null;
+  lastModified: number;
+}
+
+export interface V1MigrationPreview {
+  ledgerJson: string;
+  legacyDisplayName?: string | null;
+  hadCustomPassphrase: boolean;
+}
+
+export interface WebDavMergeFetchResult {
+  remoteJson: string;
+  remoteModified?: string | null;
+  remoteSize?: number | null;
+}
+
+export interface MergeSummary {
+  groupsAdded: number;
+  categoriesAdded: number;
+  budgetsMerged: number;
+  transactionsAdded: number;
+  transactionsUpdated: number;
+  rulesMerged: number;
+  goalsMerged: number;
+  accountsMerged: number;
+  snapshotsMerged: number;
+  planItemsMerged: number;
+  totalChanges: number;
 }
 
 export interface SaveResult {

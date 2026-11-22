@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { WebDavCheckResult, WebDavConfig, WebDavMode, WebDavSyncResult } from '../types';
 import {
   checkWebDav,
+  fetchWebDavDecryptedForMerge,
   isTauriEnv,
   isWebDavConflictError,
   isWebDavPrimary,
@@ -39,7 +40,7 @@ export interface WebDavConflictInfo {
   localModified?: number | null;
 }
 
-export type WebDavConflictChoice = 'cloud' | 'local' | 'later' | 'cancel';
+export type WebDavConflictChoice = 'merge' | 'cloud' | 'local' | 'later' | 'cancel';
 
 export interface WebDavSyncController {
   isPrimary: boolean;
@@ -79,6 +80,8 @@ interface Options {
   withSavesSuspended: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Reloads the ledger from the local DB, keeping this device's WebDAV settings. */
   reloadFromDb: () => Promise<boolean>;
+  /** Deterministically merges a decrypted remote ledger JSON into local state and saves. */
+  mergeWithRemoteJson?: (remoteJson: string) => Promise<void>;
   notify: (message: string) => void;
   setMode: (mode: WebDavMode) => void;
 }
@@ -392,7 +395,32 @@ export function useWebDavSync(opts: Options): WebDavSyncController {
       try {
         await exclusive(async () => {
           setStatus({ phase: 'syncing', message: 'Syncing…', at: statusRef.current.at });
-          if (choice === 'cloud') {
+          if (choice === 'merge') {
+            await o.flushSave();
+            const fetched = await fetchWebDavDecryptedForMerge(
+              cfg.url,
+              cfg.username,
+              cfg.password!,
+              cfg.remoteFileName
+            );
+            if (!o.mergeWithRemoteJson) {
+              throw new Error('Record-level merge handler is not available.');
+            }
+            await o.mergeWithRemoteJson(fetched.remoteJson);
+            const res = await pushToWebDav(
+              cfg.url,
+              cfg.username,
+              cfg.password!,
+              cfg.remoteFileName,
+              {
+                force: true,
+                preserveRemote: true,
+              }
+            );
+            linkedKeyRef.current = targetKey(cfg);
+            setSynced();
+            o.notify(res.message || 'Merged cloud and local changes and synced.');
+          } else if (choice === 'cloud') {
             await pullAndReload(cfg);
             setSynced();
             o.notify('Loaded the cloud version of the vault. This device’s copy was kept as a backup file.');

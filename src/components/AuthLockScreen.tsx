@@ -1,396 +1,493 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Fingerprint,
-  KeyRound,
-  Lock,
-  ShieldCheck,
+  AlertTriangle,
+  ArrowRight,
+  CloudDownload,
   Eye,
   EyeOff,
-  Sparkles,
-  CheckCircle2,
-  AlertCircle,
-  UserCheck,
-  Laptop,
-  ArrowRight,
+  FileKey2,
+  Fingerprint,
+  FolderOpen,
+  KeyRound,
+  Loader2,
+  Lock,
+  ShieldCheck,
 } from 'lucide-react';
-import { AuthConfig, PasskeyCredentialRecord } from '../types';
-import {
-  authenticateWithPasskeyOrWindowsHello,
-  checkBiometricPasskeySupport,
-  hashPassphraseVerifier,
-  registerPasskeyOrWindowsHello,
-  verifyMasterPassphrase,
-} from '../utils/auth';
-import { Logo } from './Logo';
+import { LedgerState, VaultStatus } from '../types';
 import { useI18n } from '../i18n';
-import { LanguageSelect } from './LanguageSelect';
+import { Logo } from './Logo';
+import { KeyFileSelector } from './KeyFileSelector';
+import { PassphraseStrengthBar } from './PassphraseStrengthBar';
+import { MIN_VAULT_PASSPHRASE_LENGTH } from '../utils/auth';
+import {
+  getVaultStatus,
+  isTauriEnv,
+  migrateV1ToV2,
+  openDatabaseFile,
+  pickOpenFileDialog,
+  unlockV1ForMigration,
+  unlockVault,
+  unlockVaultWithDevice,
+  unlockVaultWithRecovery,
+} from '../utils/storage';
 
 interface AuthLockScreenProps {
-  authConfig: AuthConfig;
-  hasCustomDbPassphrase?: boolean;
-  /**
-   * Resolves false when the vault stays encrypted (no or wrong vault passphrase).
-   * `adoptAsVaultPassphrase`: a verified master passphrase that should also become the vault
-   * passphrase when the vault still uses the built-in default key.
-   */
-  onUnlockSuccess: (opts: {
-    unlockedVaultSecret?: string;
-    adoptAsVaultPassphrase?: boolean;
-    updatedConfig?: AuthConfig;
-  }) => Promise<boolean>;
+  vaultStatus: VaultStatus;
+  onUnlocked: (state: LedgerState, nextStatus: VaultStatus) => Promise<void> | void;
+  onMigrated: (
+    state: LedgerState,
+    nextStatus: VaultStatus,
+    recoveryKey: string | null
+  ) => Promise<void> | void;
+  onOpenWebDavVault: () => void;
+  onVaultFileSwitched: () => Promise<void>;
 }
 
-const VAULT_STILL_LOCKED_MSG =
-  'This vault is encrypted with a custom passphrase. Enter the correct passphrase to decrypt it.';
-
 export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
-  authConfig,
-  hasCustomDbPassphrase,
-  onUnlockSuccess,
+  vaultStatus,
+  onUnlocked,
+  onMigrated,
+  onOpenWebDavVault,
+  onVaultFileSwitched,
 }) => {
-  const { t, tf } = useI18n();
-  const hasCredentialsConfigured =
-    authConfig.passkeys.length > 0 ||
-    authConfig.hasMasterPassphrase ||
-    Boolean(hasCustomDbPassphrase);
+  const { t } = useI18n();
 
-  const [displayName, setDisplayName] = useState(
-    authConfig.userDisplayName || 'Koban Owner'
-  );
-  const [passphraseInput, setPassphraseInput] = useState('');
-  const [confirmPassphraseInput, setConfirmPassphraseInput] = useState('');
+  // Normal v2 unlock state
+  const [unlockTab, setUnlockTab] = useState<'password' | 'recovery'>('password');
+  const [passphrase, setPassphrase] = useState('');
   const [showPassphrase, setShowPassphrase] = useState(false);
-  const [isBusy, setIsBusy] = useState(false);
+  const [keyfilePath, setKeyfilePath] = useState<string | null>(
+    vaultStatus.rememberedKeyFilePath ?? null
+  );
+  const [showKeyFileBox, setShowKeyFileBox] = useState(vaultStatus.requiresKeyFile);
+  const [rememberKeyfile, setRememberKeyfile] = useState(
+    Boolean(vaultStatus.rememberedKeyFilePath)
+  );
+  const [recoveryInput, setRecoveryInput] = useState('');
+
+  // Legacy v1 -> v2 migration state
+  const [v1Passphrase, setV1Passphrase] = useState('');
+  const [v1UnlockedPreview, setV1UnlockedPreview] = useState(
+    !vaultStatus.hasLegacyCustomPassphrase
+  );
+  const [v1OwnerName, setV1OwnerName] = useState<string | null>(null);
+  const [newPassphrase, setNewPassphrase] = useState('');
+  const [confirmNewPassphrase, setConfirmNewPassphrase] = useState('');
+  const [migrationKeyfilePath, setMigrationKeyfilePath] = useState<string | null>(null);
+  const [rememberMigrationKeyfile, setRememberMigrationKeyfile] = useState(false);
+  const [createRecoveryKey, setCreateRecoveryKey] = useState(true);
+
+  const [busy, setBusy] = useState<'none' | 'unlock' | 'device' | 'recovery' | 'migrate'>(
+    'none'
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
-  const [supportInfo, setSupportInfo] = useState<{
-    webauthnAvailable: boolean;
-    platformAuthenticatorAvailable: boolean;
-    windowsHelloNativeAvailable: boolean;
-  }>({
-    webauthnAvailable: true,
-    platformAuthenticatorAvailable: true,
-    windowsHelloNativeAvailable: false,
-  });
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [didAutoDevicePrompt, setDidAutoDevicePrompt] = useState(false);
 
-  const autoPromptTriggered = useRef(false);
-
+  // Sync keyfile requirements if vaultStatus changes (e.g. user opened a different DB)
   useEffect(() => {
-    checkBiometricPasskeySupport().then(setSupportInfo);
-  }, []);
+    setKeyfilePath(vaultStatus.rememberedKeyFilePath ?? null);
+    setShowKeyFileBox(vaultStatus.requiresKeyFile || Boolean(vaultStatus.rememberedKeyFilePath));
+    setRememberKeyfile(Boolean(vaultStatus.rememberedKeyFilePath));
+    setV1UnlockedPreview(!vaultStatus.hasLegacyCustomPassphrase);
+    setErrorMsg(null);
+  }, [vaultStatus.dbPath, vaultStatus.requiresKeyFile, vaultStatus.rememberedKeyFilePath, vaultStatus.hasLegacyCustomPassphrase]);
 
-  // Auto-prompt Passkey / Windows Hello on launch if enabled and passkeys exist
+  // Preload legacy owner display name if v1 doesn't require passphrase
+  useEffect(() => {
+    if (!vaultStatus.needsMigration || vaultStatus.hasLegacyCustomPassphrase) return;
+    let cancelled = false;
+    unlockV1ForMigration(null)
+      .then((res) => {
+        if (!cancelled) {
+          setV1UnlockedPreview(true);
+          setV1OwnerName(res.legacyDisplayName ?? null);
+        }
+      })
+      .catch(() => {
+        // user can unlock below
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultStatus.needsMigration, vaultStatus.hasLegacyCustomPassphrase, vaultStatus.dbPath]);
+
+  const handleDeviceUnlock = async () => {
+    setErrorMsg(null);
+    setBusy('device');
+    try {
+      const state = await unlockVaultWithDevice();
+      const refreshed = await getVaultStatus();
+      await onUnlocked(state, refreshed);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy('none');
+    }
+  };
+
   useEffect(() => {
     if (
-      hasCredentialsConfigured &&
-      authConfig.autoPromptPasskeyOnLaunch &&
-      authConfig.passkeys.length > 0 &&
-      !autoPromptTriggered.current
+      !vaultStatus.needsMigration &&
+      vaultStatus.deviceSlotEnrolled &&
+      vaultStatus.windowsHelloAvailable &&
+      vaultStatus.authSettings.autoPromptDevice &&
+      !didAutoDevicePrompt
     ) {
-      autoPromptTriggered.current = true;
-      handleSignInWithPasskey();
+      setDidAutoDevicePrompt(true);
+      const timer = setTimeout(() => {
+        void handleDeviceUnlock();
+      }, 250);
+      return () => clearTimeout(timer);
     }
-  }, [hasCredentialsConfigured, authConfig]);
+  }, [
+    vaultStatus.needsMigration,
+    vaultStatus.deviceSlotEnrolled,
+    vaultStatus.windowsHelloAvailable,
+    vaultStatus.authSettings.autoPromptDevice,
+    didAutoDevicePrompt,
+  ]);
 
-  const handleSignInWithPasskey = async (specificId?: string) => {
-    setErrorMsg(null);
-    setStatusMsg('Waiting for Passkey / Windows Hello verification…');
-    setIsBusy(true);
-    try {
-      const res = await authenticateWithPasskeyOrWindowsHello(
-        authConfig,
-        specificId
-      );
-      if (res.verified) {
-        const now = Math.floor(Date.now() / 1000);
-        const updatedPasskeys = authConfig.passkeys.map((p) =>
-          p.id === res.credential.id ? { ...p, lastUsedAt: now } : p
-        );
-        const nextConfig: AuthConfig = {
-          ...authConfig,
-          passkeys: updatedPasskeys,
-        };
-        setStatusMsg('Verified via Passkey / Windows Hello.');
-        const unlocked = await onUnlockSuccess({
-          unlockedVaultSecret: res.unwrappedVaultSecret,
-          updatedConfig: nextConfig,
-        });
-        if (!unlocked) {
-          setStatusMsg(null);
-          setErrorMsg(VAULT_STILL_LOCKED_MSG);
-        }
-      }
-    } catch (err) {
-      setStatusMsg(null);
-      setErrorMsg(
-        err instanceof Error
-          ? err.message
-          : 'Passkey / Windows Hello verification was canceled or failed.'
-      );
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleSignInWithPassphrase = async (e: React.FormEvent) => {
+  const handlePasswordUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = passphraseInput.trim();
-    if (!trimmed) {
-      setErrorMsg('Please enter your Master Passphrase or PIN.');
+    setErrorMsg(null);
+    if (!passphrase) {
+      setErrorMsg('Please enter your Master Password.');
       return;
     }
-
-    setErrorMsg(null);
-    setIsBusy(true);
+    if (vaultStatus.requiresKeyFile && !keyfilePath) {
+      setErrorMsg(t('vault.keyFileRequired'));
+      setShowKeyFileBox(true);
+      return;
+    }
+    setBusy('unlock');
     try {
-      const masterValid =
-        authConfig.hasMasterPassphrase &&
-        (await verifyMasterPassphrase(trimmed, authConfig));
-      // A vault with a custom passphrase is the real check: its passphrase may differ from the
-      // master passphrase, and decryption (in onUnlockSuccess) decides whether it is correct.
-      if (authConfig.hasMasterPassphrase && !masterValid && !hasCustomDbPassphrase) {
-        setErrorMsg('Incorrect Master Passphrase or PIN. Please try again.');
-        setIsBusy(false);
-        return;
-      }
-      const unlocked = await onUnlockSuccess({
-        unlockedVaultSecret: trimmed,
-        adoptAsVaultPassphrase: masterValid,
-      });
-      if (!unlocked) setErrorMsg(VAULT_STILL_LOCKED_MSG);
-    } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : 'Failed to verify passphrase.'
+      const state = await unlockVault(
+        passphrase,
+        keyfilePath,
+        keyfilePath ? rememberKeyfile : false
       );
+      const refreshed = await getVaultStatus();
+      await onUnlocked(state, refreshed);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
-      setIsBusy(false);
+      setBusy('none');
     }
   };
 
-  const handleEnrollPasskeyFirstTime = async (
-    preferMode: 'auto' | 'webauthn' | 'windows_hello'
-  ) => {
-    setErrorMsg(null);
-    setStatusMsg(
-      preferMode === 'windows_hello'
-        ? 'Opening Windows Hello security prompt…'
-        : 'Opening Passkey / Windows Hello registration prompt…'
-    );
-    setIsBusy(true);
-    try {
-      const cleanName = displayName.trim() || 'Koban Owner';
-      const secretToWrap = passphraseInput.trim() || undefined;
-      const newCred: PasskeyCredentialRecord =
-        await registerPasskeyOrWindowsHello({
-          userDisplayName: cleanName,
-          credentialLabel:
-            preferMode === 'windows_hello'
-              ? 'Windows Hello (This PC)'
-              : 'Windows Hello / Passkey',
-          preferMode,
-        });
-
-      let nextConfig: AuthConfig = {
-        ...authConfig,
-        enabled: true,
-        userDisplayName: cleanName,
-        passkeys: [...authConfig.passkeys, newCred],
-      };
-
-      if (secretToWrap) {
-        const { saltB64, hashB64 } = await hashPassphraseVerifier(secretToWrap);
-        nextConfig = {
-          ...nextConfig,
-          hasMasterPassphrase: true,
-          passphraseSaltB64: saltB64,
-          passphraseVerifierHashB64: hashB64,
-        };
-      }
-
-      const unlocked = await onUnlockSuccess({
-        unlockedVaultSecret: secretToWrap,
-        adoptAsVaultPassphrase: Boolean(secretToWrap),
-        updatedConfig: nextConfig,
-      });
-      if (!unlocked) {
-        setStatusMsg(null);
-        setErrorMsg(VAULT_STILL_LOCKED_MSG);
-      }
-    } catch (err) {
-      setStatusMsg(null);
-      setErrorMsg(
-        err instanceof Error
-          ? err.message
-          : 'Could not complete Passkey / Windows Hello registration.'
-      );
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleEnrollPassphraseOnlyFirstTime = async (e: React.FormEvent) => {
+  const handleRecoveryUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    const p1 = passphraseInput.trim();
-    const p2 = confirmPassphraseInput.trim();
-    if (p1.length < 4) {
-      setErrorMsg(t('settings.login.errPassphraseShort'));
-      return;
-    }
-    if (p1 !== p2) {
-      setErrorMsg(t('onboarding.s4.errMismatch'));
-      return;
-    }
-
     setErrorMsg(null);
-    setIsBusy(true);
+    if (!recoveryInput.trim()) {
+      setErrorMsg('Please enter your 160-bit Recovery Key.');
+      return;
+    }
+    setBusy('recovery');
     try {
-      const cleanName = displayName.trim() || 'Koban Owner';
-      const { saltB64, hashB64 } = await hashPassphraseVerifier(p1);
-      const nextConfig: AuthConfig = {
-        ...authConfig,
-        enabled: true,
-        userDisplayName: cleanName,
-        hasMasterPassphrase: true,
-        passphraseSaltB64: saltB64,
-        passphraseVerifierHashB64: hashB64,
-      };
-      const unlocked = await onUnlockSuccess({
-        unlockedVaultSecret: p1,
-        adoptAsVaultPassphrase: true,
-        updatedConfig: nextConfig,
-      });
-      if (!unlocked) setErrorMsg(VAULT_STILL_LOCKED_MSG);
+      const state = await unlockVaultWithRecovery(recoveryInput.trim());
+      const refreshed = await getVaultStatus();
+      await onUnlocked(state, refreshed);
     } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : 'Failed to configure passphrase.'
-      );
+      setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
-      setIsBusy(false);
+      setBusy('none');
     }
   };
+
+  const handleUnlockLegacyV1 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setBusy('migrate');
+    try {
+      const res = await unlockV1ForMigration(v1Passphrase || null);
+      setV1OwnerName(res.legacyDisplayName ?? null);
+      setV1UnlockedPreview(true);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy('none');
+    }
+  };
+
+  const handleMigrateToV2 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (!migrationKeyfilePath && newPassphrase.length < MIN_VAULT_PASSPHRASE_LENGTH) {
+      setErrorMsg(
+        `Master Password must be at least ${MIN_VAULT_PASSPHRASE_LENGTH} characters.`
+      );
+      return;
+    }
+    if (newPassphrase !== newPassphrase.trim()) {
+      setErrorMsg('Master Password cannot start or end with spaces.');
+      return;
+    }
+    if (newPassphrase !== confirmNewPassphrase) {
+      setErrorMsg('Passphrases do not match.');
+      return;
+    }
+    setBusy('migrate');
+    try {
+      const res = await migrateV1ToV2({
+        v1Passphrase: vaultStatus.hasLegacyCustomPassphrase ? v1Passphrase : null,
+        newPassphrase,
+        keyfilePath: migrationKeyfilePath,
+        createRecoveryKey,
+        rememberKeyfile: Boolean(migrationKeyfilePath && rememberMigrationKeyfile),
+      });
+      if (!res.ledgerJson) {
+        throw new Error('Migration completed without returning ledger payload.');
+      }
+      const parsed = JSON.parse(res.ledgerJson) as LedgerState;
+      await onMigrated(parsed, res.status, res.recoveryKey ?? null);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy('none');
+    }
+  };
+
+  const handleOpenAnotherDb = async () => {
+    setErrorMsg(null);
+    const picked = await pickOpenFileDialog('Koban Database (*.db)', ['db']);
+    if (!picked) return;
+    try {
+      await openDatabaseFile(picked);
+      await onVaultFileSwitched();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const dbFileName = vaultStatus.dbPath.split(/[/\\]/).pop() || 'koban.db';
 
   return (
-    <div className="min-h-screen w-screen bg-app text-ink flex flex-col items-center justify-center p-6 select-none relative overflow-hidden">
-      {/* Subtle Ambient Background Grid */}
-      <div
-        className="pointer-events-none fixed inset-0 opacity-[0.03]"
-        style={{
-          backgroundImage:
-            'radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)',
-          backgroundSize: '28px 28px',
-        }}
-      />
-
-      <div className="w-full max-w-md bg-surface border border-line rounded-2xl shadow-2xl overflow-hidden relative z-10">
-        <div className="absolute top-3.5 right-3.5 z-20">
-          <LanguageSelect variant="compact" />
-        </div>
-        {/* Top Header */}
-        <div className="px-6 pt-7 pb-5 border-b border-line bg-app/50 flex flex-col items-center text-center">
-          <div className="mb-3.5 flex items-center justify-center">
-            <Logo variant="full" size={28} />
+    <div className="min-h-screen w-full bg-app flex flex-col items-center justify-center p-6 select-none">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-surface shadow-2xl overflow-hidden">
+        <div className="px-6 pt-7 pb-5 border-b border-line text-center">
+          <div className="flex justify-center mb-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-raised border border-line flex items-center justify-center shadow-xs">
+              <Logo className="w-7 h-7" />
+            </div>
           </div>
-
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-positive/10 border border-positive/25 text-positive text-[10px] font-medium mb-2">
-            <ShieldCheck className="w-3 h-3" />
-            <span>{t('lock.encrypted')}</span>
-          </div>
-
-          <h1 className="text-lg font-semibold text-ink tracking-tight">
-            {hasCredentialsConfigured
-              ? t('lock.signIn')
-              : t('lock.configure')}
+          <h1 className="text-lg font-semibold tracking-tight text-ink">
+            {vaultStatus.needsMigration
+              ? t('vault.migrateTitle')
+              : t('lock.signIn')}
           </h1>
-
-          <p className="text-xs text-ink-2 mt-1 max-w-xs">
-            {hasCredentialsConfigured
-              ? tf('lock.subWelcome', { name: authConfig.userDisplayName || 'Koban Owner' })
-              : t('lock.subConfigure')}
+          <p className="text-xs text-ink-3 mt-1 font-mono truncate" title={vaultStatus.dbPath}>
+            {dbFileName}
           </p>
+          <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-positive/10 border border-positive/20 text-[10px] font-medium text-positive">
+            <ShieldCheck className="w-3 h-3" />
+            <span>
+              {vaultStatus.needsMigration
+                ? t('vault.badgeLegacyV1')
+                : t('vault.badgeV2')}
+            </span>
+          </div>
         </div>
 
-        {/* Body */}
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-4">
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-negative/10 border border-negative/25 flex items-start gap-2.5 text-xs text-negative">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="p-3 rounded-xl bg-negative/10 border border-negative/25 text-xs text-negative flex items-start gap-2 select-text">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
 
-          {statusMsg && !errorMsg && (
-            <div className="p-3 rounded-xl bg-indigo/10 border border-indigo/25 flex items-center gap-2.5 text-xs text-indigo">
-              <Sparkles className="w-4 h-4 shrink-0 animate-pulse" />
-              <span>{statusMsg}</span>
+          {statusNote && !errorMsg && (
+            <div className="p-2.5 rounded-xl bg-positive/10 border border-positive/25 text-xs text-positive">
+              {statusNote}
             </div>
           )}
 
-          {hasCredentialsConfigured ? (
-            /* ================= EXISTING USER SIGN-IN VIEW ================= */
-            <>
-              {authConfig.passkeys.length > 0 && (
-                <div className="space-y-2.5">
-                  <button
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => handleSignInWithPasskey()}
-                    className="w-full h-11 px-4 rounded-xl bg-ink text-app font-medium text-xs inline-flex items-center justify-center gap-2.5 hover:opacity-90 transition-opacity shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    <Fingerprint className="w-4 h-4" />
-                    <span>{t('lock.passkeyBtn')}</span>
-                    <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
-                  </button>
-
-                  {authConfig.passkeys.length > 1 && (
-                    <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
-                      {authConfig.passkeys.map((pk) => (
-                        <button
-                          key={pk.id}
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleSignInWithPasskey(pk.id)}
-                          className="px-2.5 py-1 rounded-lg bg-raised border border-line text-[11px] text-ink-2 hover:text-ink hover:bg-line/50 inline-flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <Laptop className="w-3 h-3 text-indigo" />
-                          <span>{pk.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+          {vaultStatus.needsMigration ? (
+            !v1UnlockedPreview ? (
+              <form onSubmit={handleUnlockLegacyV1} className="space-y-4">
+                <p className="text-xs text-ink-2 leading-relaxed">
+                  Enter your legacy v1 vault passphrase to inspect and upgrade this database to Vault Format v2.
+                </p>
+                <div>
+                  <label className="block text-[11px] font-medium text-ink-2 mb-1">
+                    Legacy v1 Passphrase
+                  </label>
+                  <input
+                    type="password"
+                    value={v1Passphrase}
+                    onChange={(e) => setV1Passphrase(e.target.value)}
+                    autoFocus
+                    className="w-full h-10 px-3 rounded-xl bg-app border border-line text-sm text-ink focus:outline-none focus:border-ink"
+                    placeholder="Enter current database passphrase"
+                  />
                 </div>
+                <button
+                  type="submit"
+                  disabled={busy !== 'none'}
+                  className="w-full h-10 rounded-xl bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-2 hover:opacity-90 cursor-pointer disabled:opacity-50"
+                >
+                  {busy === 'migrate' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="w-4 h-4" />
+                  )}
+                  <span>Verify Legacy Vault</span>
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleMigrateToV2} className="space-y-3.5">
+                <p className="text-xs text-ink-2 leading-relaxed">
+                  {v1OwnerName
+                    ? `Upgrading vault for ${v1OwnerName}. `
+                    : ''}
+                  {t('vault.migrateDesc')}
+                </p>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-ink-2 mb-1">
+                    New Master Password (min {MIN_VAULT_PASSPHRASE_LENGTH} chars)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassphrase ? 'text' : 'password'}
+                      value={newPassphrase}
+                      onChange={(e) => setNewPassphrase(e.target.value)}
+                      autoFocus
+                      className="w-full h-10 pl-3 pr-9 rounded-xl bg-app border border-line text-sm text-ink focus:outline-none focus:border-ink"
+                      placeholder="Choose a strong Master Password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassphrase((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink cursor-pointer"
+                    >
+                      {showPassphrase ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <div className="mt-2">
+                    <PassphraseStrengthBar
+                      passphrase={newPassphrase}
+                      onGenerate={(g) => {
+                        setNewPassphrase(g);
+                        setConfirmNewPassphrase(g);
+                        setShowPassphrase(true);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-ink-2 mb-1">
+                    Confirm Master Password
+                  </label>
+                  <input
+                    type={showPassphrase ? 'text' : 'password'}
+                    value={confirmNewPassphrase}
+                    onChange={(e) => setConfirmNewPassphrase(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl bg-app border border-line text-sm text-ink focus:outline-none focus:border-ink"
+                    placeholder="Repeat Master Password"
+                  />
+                </div>
+
+                <KeyFileSelector
+                  keyfilePath={migrationKeyfilePath}
+                  onChange={setMigrationKeyfilePath}
+                  allowGenerate
+                  rememberChecked={rememberMigrationKeyfile}
+                  onRememberChange={setRememberMigrationKeyfile}
+                  onStatusMessage={setStatusNote}
+                />
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-raised/50 border border-line text-xs text-ink-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createRecoveryKey}
+                    onChange={(e) => setCreateRecoveryKey(e.target.checked)}
+                    className="mt-0.5 rounded border-line"
+                  />
+                  <span>Generate a 160-bit emergency Recovery Key (recommended)</span>
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={busy !== 'none'}
+                  className="w-full h-10 rounded-xl bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-2 hover:opacity-90 cursor-pointer disabled:opacity-50"
+                >
+                  {busy === 'migrate' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4" />
+                  )}
+                  <span>{t('vault.migrateConfirm')}</span>
+                </button>
+              </form>
+            )
+          ) : (
+            <>
+              {vaultStatus.deviceSlotEnrolled && vaultStatus.windowsHelloAvailable && (
+                <button
+                  type="button"
+                  disabled={busy !== 'none'}
+                  onClick={handleDeviceUnlock}
+                  className="w-full h-10 rounded-xl bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-2 hover:opacity-90 cursor-pointer disabled:opacity-50"
+                >
+                  {busy === 'device' ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Fingerprint className="w-4 h-4" />
+                  )}
+                  <span>{t('vault.windowsHelloUnlock')}</span>
+                </button>
               )}
 
-              {authConfig.passkeys.length > 0 &&
-                (authConfig.hasMasterPassphrase || hasCustomDbPassphrase) && (
-                  <div className="relative flex items-center justify-center">
-                    <div className="border-t border-line w-full" />
-                    <span className="bg-surface px-3 text-[10px] uppercase tracking-wider text-ink-3">
-                      {t('lock.orPassphrase')}
-                    </span>
-                    <div className="border-t border-line w-full" />
-                  </div>
-                )}
-
-              {(authConfig.hasMasterPassphrase ||
-                hasCustomDbPassphrase ||
-                authConfig.passkeys.length === 0) && (
-                <form
-                  onSubmit={handleSignInWithPassphrase}
-                  className="space-y-3"
+              <div className="grid grid-cols-2 p-1 rounded-xl bg-raised border border-line text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUnlockTab('password');
+                    setErrorMsg(null);
+                  }}
+                  className={`h-8 rounded-lg font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer ${
+                    unlockTab === 'password'
+                      ? 'bg-surface text-ink shadow-xs'
+                      : 'text-ink-3 hover:text-ink'
+                  }`}
                 >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{t('vault.passwordTab')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUnlockTab('recovery');
+                    setErrorMsg(null);
+                  }}
+                  className={`h-8 rounded-lg font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer ${
+                    unlockTab === 'recovery'
+                      ? 'bg-surface text-ink shadow-xs'
+                      : 'text-ink-3 hover:text-ink'
+                  }`}
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{t('vault.recoveryTab')}</span>
+                </button>
+              </div>
+
+              {unlockTab === 'password' ? (
+                <form onSubmit={handlePasswordUnlock} className="space-y-3.5">
                   <div>
-                    <label className="block text-[11px] font-medium text-ink-2 mb-1.5">
+                    <label className="block text-[11px] font-medium text-ink-2 mb-1">
                       {t('lock.passphraseLabel')}
                     </label>
                     <div className="relative">
-                      <KeyRound className="w-3.5 h-3.5 text-ink-3 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type={showPassphrase ? 'text' : 'password'}
-                        value={passphraseInput}
-                        onChange={(e) => setPassphraseInput(e.target.value)}
+                        value={passphrase}
+                        onChange={(e) => setPassphrase(e.target.value)}
+                        autoFocus={!vaultStatus.deviceSlotEnrolled}
+                        className="w-full h-10 pl-3 pr-9 rounded-xl bg-app border border-line text-sm text-ink focus:outline-none focus:border-ink"
                         placeholder={t('lock.passphrasePlaceholder')}
-                        autoFocus={authConfig.passkeys.length === 0}
-                        className="w-full h-10 pl-9 pr-9 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
                       />
                       <button
                         type="button"
@@ -398,136 +495,104 @@ export const AuthLockScreen: React.FC<AuthLockScreenProps> = ({
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink cursor-pointer"
                       >
                         {showPassphrase ? (
-                          <EyeOff className="w-3.5 h-3.5" />
+                          <EyeOff className="w-4 h-4" />
                         ) : (
-                          <Eye className="w-3.5 h-3.5" />
+                          <Eye className="w-4 h-4" />
                         )}
                       </button>
                     </div>
                   </div>
 
+                  {vaultStatus.requiresKeyFile || showKeyFileBox ? (
+                    <KeyFileSelector
+                      keyfilePath={keyfilePath}
+                      onChange={setKeyfilePath}
+                      allowGenerate={false}
+                      rememberChecked={rememberKeyfile}
+                      onRememberChange={setRememberKeyfile}
+                      requiredBadge={vaultStatus.requiresKeyFile}
+                      compact
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyFileBox(true)}
+                      className="text-[11px] text-indigo hover:underline inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <FileKey2 className="w-3.5 h-3.5" />
+                      <span>Use Key File (.key)</span>
+                    </button>
+                  )}
+
                   <button
                     type="submit"
-                    disabled={isBusy}
-                    className={`w-full h-10 px-4 rounded-xl text-xs font-medium inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50 ${
-                      authConfig.passkeys.length === 0
-                        ? 'bg-ink text-app hover:opacity-90'
-                        : 'bg-raised border border-line text-ink hover:bg-line/70'
+                    disabled={busy !== 'none'}
+                    className={`w-full h-10 rounded-xl text-xs font-medium inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+                      vaultStatus.deviceSlotEnrolled && vaultStatus.windowsHelloAvailable
+                        ? 'border border-line bg-raised text-ink hover:bg-line/50'
+                        : 'bg-ink text-on-ink hover:opacity-90'
                     }`}
                   >
-                    <Lock className="w-3.5 h-3.5" />
+                    {busy === 'unlock' ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Lock className="w-4 h-4" />
+                    )}
                     <span>{t('lock.unlockPassphrase')}</span>
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleRecoveryUnlock} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-medium text-ink-2 mb-1">
+                      160-bit Recovery Key (Crockford Base32)
+                    </label>
+                    <input
+                      type="text"
+                      value={recoveryInput}
+                      onChange={(e) => setRecoveryInput(e.target.value)}
+                      autoFocus
+                      className="w-full h-10 px-3 rounded-xl bg-app border border-line text-xs font-mono text-ink tracking-wider focus:outline-none focus:border-ink"
+                      placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busy !== 'none'}
+                    className="w-full h-10 rounded-xl bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-2 hover:opacity-90 cursor-pointer disabled:opacity-50"
+                  >
+                    {busy === 'recovery' ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <KeyRound className="w-4 h-4" />
+                    )}
+                    <span>Unlock with Recovery Key</span>
                   </button>
                 </form>
               )}
             </>
-          ) : (
-            /* ================= FIRST-TIME LOGIN ENROLLMENT VIEW ================= */
-            <div className="space-y-4">
-              <div>
-                <label className="block text-[11px] font-medium text-ink-2 mb-1.5">
-                  {t('lock.displayNameLabel')}
-                </label>
-                <div className="relative">
-                  <UserCheck className="w-3.5 h-3.5 text-ink-3 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder={t('settings.login.ownerPlaceholder')}
-                    className="w-full h-9 pl-9 pr-3 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
-                  />
-                </div>
-              </div>
+          )}
 
-              {/* Primary Passkey / Windows Hello Enrollment Box */}
-              <div className="p-3.5 rounded-xl bg-indigo/8 border border-indigo/25 space-y-2.5">
-                <div className="flex items-start gap-2.5">
-                  <Fingerprint className="w-4 h-4 text-indigo shrink-0 mt-0.5" />
-                  <div>
-                    <div className="text-xs font-medium text-ink">
-                      {t('lock.passkeyBioTitle')}
-                    </div>
-                    <p className="text-[11px] text-ink-2 leading-relaxed mt-0.5">
-                      {t('lock.passkeyBioDesc')}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => handleEnrollPasskeyFirstTime('auto')}
-                    className="w-full h-10 px-4 rounded-xl bg-ink text-app text-xs font-medium inline-flex items-center justify-center gap-2 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-                  >
-                    <Fingerprint className="w-4 h-4" />
-                    <span>{t('lock.enroll')}</span>
-                  </button>
-
-                  {supportInfo.windowsHelloNativeAvailable && (
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() =>
-                        handleEnrollPasskeyFirstTime('windows_hello')
-                      }
-                      className="w-full h-9 px-3 rounded-xl bg-surface border border-line text-xs text-ink hover:bg-raised inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      <Laptop className="w-3.5 h-3.5 text-indigo" />
-                      <span>{t('lock.enrollNativeHello')}</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="relative flex items-center justify-center">
-                <div className="border-t border-line w-full" />
-                <span className="bg-surface px-3 text-[10px] uppercase tracking-wider text-ink-3">
-                  {t('lock.orSetPassphrase')}
-                </span>
-                <div className="border-t border-line w-full" />
-              </div>
-
-              <form
-                onSubmit={handleEnrollPassphraseOnlyFirstTime}
-                className="space-y-2.5"
+          {isTauriEnv() && (
+            <div className="pt-3 border-t border-line flex items-center justify-between gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={handleOpenAnotherDb}
+                className="inline-flex items-center gap-1.5 text-ink-2 hover:text-ink cursor-pointer"
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type={showPassphrase ? 'text' : 'password'}
-                    value={passphraseInput}
-                    onChange={(e) => setPassphraseInput(e.target.value)}
-                    placeholder={t('lock.shortPassphrasePlaceholder')}
-                    className="w-full h-9 px-3 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
-                  />
-                  <input
-                    type={showPassphrase ? 'text' : 'password'}
-                    value={confirmPassphraseInput}
-                    onChange={(e) => setConfirmPassphraseInput(e.target.value)}
-                    placeholder={t('lock.confirmShortPlaceholder')}
-                    className="w-full h-9 px-3 rounded-xl bg-raised border border-line text-xs text-ink focus:outline-none focus:border-ink-2"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={isBusy || !passphraseInput.trim()}
-                  className="w-full h-9 px-3 rounded-xl bg-raised border border-line text-xs font-medium text-ink hover:bg-line/70 transition-colors cursor-pointer disabled:opacity-40"
-                >
-                  {t('lock.savePassphraseSignIn')}
-                </button>
-              </form>
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span>{t('vault.openAnotherDb')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onOpenWebDavVault}
+                className="inline-flex items-center gap-1.5 text-ink-2 hover:text-ink cursor-pointer"
+              >
+                <CloudDownload className="w-3.5 h-3.5" />
+                <span>{t('onboarding.openWebDav')}</span>
+              </button>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-3 border-t border-line bg-app/40 flex items-center justify-between text-[11px] text-ink-3">
-          <span className="inline-flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-positive" />
-            <span>{t('lock.bioReadyHello')}</span>
-          </span>
-          <span>{t('lock.zeroKnowledgeFooter')}</span>
         </div>
       </div>
     </div>

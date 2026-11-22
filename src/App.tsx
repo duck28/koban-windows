@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   ActiveWorkspace,
   AppSettings,
-  AuthConfig,
   CategoryGroup,
   CategoryItem,
   CategoryKind,
@@ -16,6 +15,7 @@ import {
   RecurringRule,
   SavingsGoal,
   TransactionItem,
+  VaultStatus,
   ViewTab,
   WebDavConfig,
   YearlyPlanItem,
@@ -32,28 +32,31 @@ import {
   computeNetWorthMetrics,
 } from './utils/calculations';
 import {
+  applyDeviceBackupDir,
   base64ToUint8,
+  checkExternalVaultChange,
+  createVault,
   downloadVaultFromWebDav,
+  enrollDeviceUnlock,
   exportSqliteDatabaseCopy,
   forgetWebDavSyncState,
-  getDatabaseInfo,
+  getVaultStatus,
+  isExternalDbModifiedError,
   isTauriEnv,
   loadLedgerFromDb,
+  lockVault,
   pickFolderDialog,
   pickOpenFileDialog,
+  rememberDeviceBackupDir,
   restoreFromBackupFile,
   revealPathInExplorer,
   runManualBackup,
+  saveAuthSettings,
   saveLedgerToDb,
-  applyDeviceBackupDir,
-  rememberDeviceBackupDir,
-  updateVaultPassphrase,
+  changeVaultCredentials,
 } from './utils/storage';
-import {
-  DEFAULT_AUTH_CONFIG,
-  loadAuthConfig,
-  saveAuthConfig,
-} from './utils/auth';
+import { clearLegacyLocalAuthCache } from './utils/auth';
+import { mergeLedgers } from './utils/ledgerMerge';
 import {
   exportExcelWorkbook,
   exportMonthlyBudgetCsv,
@@ -80,6 +83,7 @@ import { RecurringView } from './components/RecurringView';
 import { SavingsGoalsView } from './components/SavingsGoalsView';
 import { BackupsExportView } from './components/BackupsExportView';
 import { SettingsView } from './components/SettingsView';
+import { RecoveryKeyModal } from './components/RecoveryKeyModal';
 import { WebDavConflictDialog } from './components/WebDavConflictDialog';
 import {
   WebDavOpenVaultModal,
@@ -183,8 +187,8 @@ export function App() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [pendingImportPreview, setPendingImportPreview] =
     useState<ImportPreviewData | null>(null);
-  const [authConfig, setAuthConfig] = useState<AuthConfig>(DEFAULT_AUTH_CONFIG);
-  const [hasCustomDbPassphrase, setHasCustomDbPassphrase] = useState(false);
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+  const [pendingRecoveryKey, setPendingRecoveryKey] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   const [preselectedCategoryId, setPreselectedCategoryId] = useState<string | null>(
     null
@@ -271,10 +275,36 @@ export function App() {
       setIsSaving(true);
       try {
         rememberDeviceBackupDir(snapshot.settings?.backupDir ?? '');
-        await saveLedgerToDb(snapshot);
-        lastSavedJsonRef.current = json;
-        notifySavedRef.current();
-        return true;
+        try {
+          await saveLedgerToDb(snapshot);
+          lastSavedJsonRef.current = json;
+          notifySavedRef.current();
+          return true;
+        } catch (e) {
+          if (isExternalDbModifiedError(e)) {
+            const ext = await checkExternalVaultChange();
+            if (ext.externalStateJson) {
+              const externalState = normalizeLedger(
+                JSON.parse(ext.externalStateJson) as LedgerState
+              );
+              const { merged, summary } = mergeLedgers(snapshot, externalState, {
+                prefer: 'local',
+              });
+              const normalizedMerged = applyDeviceBackupDir(merged);
+              const mergedJson = JSON.stringify(normalizedMerged);
+              latestStateRef.current = normalizedMerged;
+              setState(normalizedMerged);
+              await saveLedgerToDb(normalizedMerged, { forceOverwrite: true });
+              lastSavedJsonRef.current = mergedJson;
+              notifySavedRef.current();
+              if (summary.totalChanges > 0) {
+                showNotification(t('merge.externalConflictMerged'));
+              }
+              return true;
+            }
+          }
+          throw e;
+        }
       } catch (e) {
         console.error('Encrypted auto-save failed:', e);
         return false;
@@ -322,32 +352,63 @@ export function App() {
     setState(normalized);
   };
 
+  /** Strict cryptographic lock: flushes pending edits while still unlocked, then clears DEK & plaintext ledger. */
+  const lockVaultNow = async () => {
+    if (!saveBlockedRef.current && vaultStatus?.unlocked) {
+      await persistLatest().catch(() => false);
+    }
+    await lockVault().catch(() => {});
+    setSaveBlocked(true);
+    const cleared = createInitialLedgerState('both', 'EUR', '', false);
+    latestStateRef.current = cleared;
+    lastSavedJsonRef.current = null;
+    setState(cleared);
+    const st = await getVaultStatus().catch(() => null);
+    if (st) setVaultStatus(st);
+    setIsLocked(true);
+  };
+
   /** Reloads the ledger from the local DB (after a WebDAV pull), keeping this device's WebDAV settings. */
   const reloadLedgerFromDb = async (): Promise<boolean> => {
+    const st = await getVaultStatus().catch(() => null);
+    if (st) setVaultStatus(st);
+    if (st && !st.unlocked) {
+      pendingWebDavRef.current = latestStateRef.current.settings.webdav ?? null;
+      setSaveBlocked(true);
+      setIsLocked(true);
+      return false;
+    }
     const loaded = await loadLedgerFromDb();
     if (!loaded || !loaded.settings) {
-      const info = await getDatabaseInfo().catch(() => null);
-      if (info?.has_custom_passphrase) {
-        // The downloaded vault uses a passphrase this session does not know: block saves
-        // (never overwrite it with the in-memory ledger) and ask for the passphrase.
-        pendingWebDavRef.current = latestStateRef.current.settings.webdav ?? null;
-        setSaveBlocked(true);
-        setHasCustomDbPassphrase(true);
-        setAuthConfig((prev) => ({ ...prev, enabled: true }));
-        setIsLocked(true);
-      }
+      pendingWebDavRef.current = latestStateRef.current.settings.webdav ?? null;
+      setSaveBlocked(true);
+      setIsLocked(true);
       return false;
     }
     applyLoadedLedger(loaded, latestStateRef.current.settings.webdav);
+    setSaveBlocked(false);
     return true;
+  };
+
+  const mergeRemoteLedgerJson = async (remoteJson: string): Promise<void> => {
+    const remoteState = normalizeLedger(JSON.parse(remoteJson) as LedgerState);
+    const { merged } = mergeLedgers(latestStateRef.current, remoteState, {
+      prefer: 'local',
+    });
+    const normalized = applyDeviceBackupDir(merged);
+    latestStateRef.current = normalized;
+    setState(normalized);
+    await saveLedgerToDb(normalized, { forceOverwrite: true });
+    lastSavedJsonRef.current = JSON.stringify(normalized);
   };
 
   const webdavSync = useWebDavSync({
     config: state.settings.webdav,
-    ready: isLoaded && !saveBlocked,
+    ready: isLoaded && !saveBlocked && !isLocked,
     flushSave: persistLatest,
     withSavesSuspended,
     reloadFromDb: reloadLedgerFromDb,
+    mergeWithRemoteJson: mergeRemoteLedgerJson,
     notify: (message) => showNotification(message),
     setMode: (mode) =>
       setState((prev) =>
@@ -364,127 +425,167 @@ export function App() {
   });
   notifySavedRef.current = webdavSync.notifyLocalSave;
 
-  // Load initial encrypted database & auth config on mount
-  useEffect(() => {
-    (async () => {
-      const [loadedAuth, dbInfo, loaded] = await Promise.all([
-        loadAuthConfig(),
-        getDatabaseInfo().catch(() => null),
-        loadLedgerFromDb(),
-      ]);
-
-      const customDbPass = Boolean(dbInfo?.has_custom_passphrase);
-      setHasCustomDbPassphrase(customDbPass);
-
+  const refreshInitialVaultState = async () => {
+    clearLegacyLocalAuthCache();
+    const st = await getVaultStatus().catch(() => null);
+    setVaultStatus(st);
+    if (!st || !st.exists || !st.hasLedgerState) {
+      setSaveBlocked(true);
+      setIsLocked(false);
+      setShowSetupModal(true);
+      return;
+    }
+    if (st.unlocked) {
+      const loaded = await loadLedgerFromDb();
       if (loaded && loaded.settings) {
         applyLoadedLedger(loaded);
+        setSaveBlocked(false);
+        setIsLocked(false);
         if (!loaded.settings.setupCompleted) {
           setShowSetupModal(true);
-          setAuthConfig(loadedAuth);
-        } else {
-          // Require login on existing setup or when credentials are configured
-          const nextAuth: AuthConfig = {
-            ...loadedAuth,
-            enabled:
-              loadedAuth.enabled ||
-              loadedAuth.passkeys.length > 0 ||
-              loadedAuth.hasMasterPassphrase ||
-              true,
-          };
-          setAuthConfig(nextAuth);
-          setIsLocked(true);
         }
-      } else if (customDbPass) {
-        // The vault cannot be decrypted before unlock: never overwrite it with the blank state.
-        setSaveBlocked(true);
-        setAuthConfig({ ...loadedAuth, enabled: true });
-        setIsLocked(true);
-      } else {
-        setAuthConfig(loadedAuth);
-        if (
-          loadedAuth.enabled &&
-          (loadedAuth.passkeys.length > 0 || loadedAuth.hasMasterPassphrase)
-        ) {
-          setIsLocked(true);
-        }
-        setShowSetupModal(true);
+        return;
       }
+    }
+    setSaveBlocked(true);
+    setIsLocked(true);
+  };
+
+  // Load initial Vault Format v2 status on mount (never bypasses cryptographic unlock)
+  useEffect(() => {
+    (async () => {
+      await refreshInitialVaultState();
       setIsLoaded(true);
     })();
   }, []);
 
-  const handleUpdateAuthConfig = async (next: AuthConfig) => {
-    setAuthConfig(next);
-    await saveAuthConfig(next);
-  };
-
-  /** Returns false (and stays locked) when the vault could not be decrypted with what was provided. */
-  const handleUnlockSuccess = async (opts: {
-    unlockedVaultSecret?: string;
-    adoptAsVaultPassphrase?: boolean;
-    updatedConfig?: AuthConfig;
-  }): Promise<boolean> => {
-    if (opts.updatedConfig) {
-      setAuthConfig(opts.updatedConfig);
-      await saveAuthConfig(opts.updatedConfig);
-    }
-    if (opts.unlockedVaultSecret) {
-      const reloaded = await loadLedgerFromDb(opts.unlockedVaultSecret);
-      if (reloaded && reloaded.settings) {
-        applyLoadedLedger(reloaded);
-        setSaveBlocked(false);
-        if (!reloaded.settings.setupCompleted) {
-          setShowSetupModal(true);
-        }
-      } else if (hasCustomDbPassphrase) {
-        // The vault has its own passphrase and this input did not decrypt it: stay locked, even if
-        // the ledger is still in memory from before an auto-lock.
-        return false;
-      } else if (opts.adoptAsVaultPassphrase && !saveBlockedRef.current) {
-        // A verified master passphrase on a vault that still uses the built-in default key: encrypt
-        // the vault with it (older builds did this implicitly on the next save).
-        const info = await updateVaultPassphrase(
-          opts.unlockedVaultSecret,
-          latestStateRef.current
-        );
-        setHasCustomDbPassphrase(Boolean(info?.has_custom_passphrase));
-      }
-    }
-    if (saveBlockedRef.current) {
-      // The vault is still encrypted with a passphrase this session does not have (e.g. a passkey
-      // without a stored secret, or a wrong passphrase). Opening the app would show an empty ledger.
-      return false;
-    }
+  const handleVaultUnlocked = async (
+    loadedState: LedgerState,
+    nextStatus: VaultStatus
+  ) => {
+    setVaultStatus(nextStatus);
+    applyLoadedLedger(loadedState);
+    setSaveBlocked(false);
     setIsLocked(false);
+    if (!loadedState.settings.setupCompleted) {
+      setShowSetupModal(true);
+    }
     showNotification(
-      `Signed in as ${
-        opts.updatedConfig?.userDisplayName ||
-        authConfig.userDisplayName ||
-        'Koban Owner'
-      }.`
+      `Signed in as ${loadedState.settings.ownerDisplayName || 'Koban Owner'}.`
     );
-    return true;
   };
 
-  // Inactivity Auto-Lock Timer
+  const handleVaultMigrated = async (
+    loadedState: LedgerState,
+    nextStatus: VaultStatus,
+    recoveryKey: string | null
+  ) => {
+    setVaultStatus(nextStatus);
+    applyLoadedLedger(loadedState);
+    setSaveBlocked(false);
+    setIsLocked(false);
+    if (recoveryKey) {
+      setPendingRecoveryKey(recoveryKey);
+    }
+    showNotification('Upgraded database cleanly to Vault Format v2 (Argon2id + AES-256-GCM).');
+  };
+
+  // External cloud-folder change watcher (Synology Drive / OneDrive / iCloud / Dropbox)
+  const lastExtCheckRef = useRef(0);
   useEffect(() => {
-    if (!isLoaded || isLocked || !authConfig.autoLockMinutes) return;
-    const timeoutMs = authConfig.autoLockMinutes * 60 * 1000;
-    let timer = window.setTimeout(() => setIsLocked(true), timeoutMs);
+    if (!isLoaded || isLocked || saveBlocked || !vaultStatus?.unlocked || !isTauriEnv()) {
+      return;
+    }
+    const checkExternal = async () => {
+      const now = Date.now();
+      if (now - lastExtCheckRef.current < 3000) return;
+      lastExtCheckRef.current = now;
+      try {
+        const ext = await checkExternalVaultChange();
+        if (!ext.changed) return;
+        if (ext.externalStateJson) {
+          const remoteState = normalizeLedger(
+            JSON.parse(ext.externalStateJson) as LedgerState
+          );
+          const { merged, summary } = mergeLedgers(
+            latestStateRef.current,
+            remoteState,
+            { prefer: 'local' }
+          );
+          const normalized = applyDeviceBackupDir(merged);
+          latestStateRef.current = normalized;
+          setState(normalized);
+          if (summary.totalChanges > 0) {
+            await saveLedgerToDb(normalized, { forceOverwrite: true });
+            lastSavedJsonRef.current = JSON.stringify(normalized);
+            showNotification(
+              t('merge.externalSyncedToast').replace(
+                '{summary}',
+                `${summary.totalChanges} change(s)`
+              )
+            );
+          } else {
+            lastSavedJsonRef.current = JSON.stringify(normalized);
+          }
+        } else if (ext.error) {
+          showNotification('External vault changed with updated credentials — please unlock.');
+          await lockVaultNow();
+        }
+      } catch (err) {
+        console.warn('External vault check skipped:', err);
+      }
+    };
+
+    const onFocus = () => {
+      void checkExternal();
+    };
+    window.addEventListener('focus', onFocus);
+    const interval = window.setInterval(() => {
+      void checkExternal();
+    }, 30_000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(interval);
+    };
+  }, [isLoaded, isLocked, saveBlocked, vaultStatus?.unlocked]);
+
+  // Inactivity Auto-Lock & Lock-on-Minimize
+  useEffect(() => {
+    const idleMins = vaultStatus?.authSettings.autoLockMinutes ?? 0;
+    const lockOnMin = vaultStatus?.authSettings.lockOnMinimize ?? false;
+    if (!isLoaded || isLocked || (!idleMins && !lockOnMin)) return;
+
+    let timer = idleMins
+      ? window.setTimeout(() => void lockVaultNow(), idleMins * 60 * 1000)
+      : undefined;
 
     const resetTimer = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => setIsLocked(true), timeoutMs);
+      if (!idleMins) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void lockVaultNow(), idleMins * 60 * 1000);
+    };
+
+    const onVisibilityChange = () => {
+      if (lockOnMin && document.hidden) {
+        void lockVaultNow();
+      }
     };
 
     window.addEventListener('pointerdown', resetTimer);
     window.addEventListener('keydown', resetTimer);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      window.clearTimeout(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
       window.removeEventListener('pointerdown', resetTimer);
       window.removeEventListener('keydown', resetTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [isLoaded, isLocked, authConfig.autoLockMinutes]);
+  }, [
+    isLoaded,
+    isLocked,
+    vaultStatus?.authSettings.autoLockMinutes,
+    vaultStatus?.authSettings.lockOnMinimize,
+  ]);
 
   // Sync UI language from persisted ledger settings
   useEffect(() => {
@@ -569,7 +670,7 @@ export function App() {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
         e.preventDefault();
-        setIsLocked(true);
+        void lockVaultNow();
         return;
       }
 
@@ -660,7 +761,14 @@ export function App() {
     customItemsByGroup: Record<string, string[]>;
     accounts?: FinancialAccount[];
     skipAccountsSetup: boolean;
+    ownerDisplayName: string;
     vaultPassphrase?: string;
+    keyfilePath?: string | null;
+    rememberKeyfile?: boolean;
+    createRecoveryKey: boolean;
+    enrollWindowsHello: boolean;
+    autoLockMinutes: number;
+    lockOnMinimize: boolean;
     confirmBeforeMonthCopy: boolean;
     monthCopyScope: MonthCopyScope;
     autoPromptCopyOnEmptyMonth: boolean;
@@ -690,10 +798,10 @@ export function App() {
       fresh.settings.monthCopyScope = opts.monthCopyScope;
       fresh.settings.autoPromptCopyOnEmptyMonth =
         opts.autoPromptCopyOnEmptyMonth;
+      fresh.settings.ownerDisplayName = opts.ownerDisplayName;
       fresh.settings.language = state.settings.language;
       fresh.settings.autoCheckUpdates = state.settings.autoCheckUpdates ?? true;
       nextState = fresh;
-      setState(fresh);
     } else {
       const nextWorkspace: ActiveWorkspace =
         opts.setupMode === 'freelancer'
@@ -746,36 +854,76 @@ export function App() {
           autoBackup: opts.autoBackup,
           defaultVatRate: opts.defaultVatRate,
           taxReserveRate: opts.taxReserveRate,
+          ownerDisplayName: opts.ownerDisplayName,
           confirmBeforeMonthCopy: opts.confirmBeforeMonthCopy,
           monthCopyScope: opts.monthCopyScope,
           autoPromptCopyOnEmptyMonth: opts.autoPromptCopyOnEmptyMonth,
         },
       };
-      setState(nextState);
     }
 
-    if (opts.vaultPassphrase !== undefined) {
-      const info = await updateVaultPassphrase(opts.vaultPassphrase || null, nextState);
-      setHasCustomDbPassphrase(Boolean(info?.has_custom_passphrase));
+    const normalizedNext = normalizeLedger(applyDeviceBackupDir(nextState));
+    latestStateRef.current = normalizedNext;
+    setState(normalizedNext);
+
+    try {
+      const needsVaultCreate = !vaultStatus?.exists || !vaultStatus?.hasLedgerState;
+      let nextStatus = vaultStatus;
+      let recoveryKeyToShow: string | null = null;
+
+      if (needsVaultCreate) {
+        if (!opts.vaultPassphrase) {
+          throw new Error('Master Password is required to create Vault Format v2.');
+        }
+        const created = await createVault({
+          passphrase: opts.vaultPassphrase,
+          keyfilePath: opts.keyfilePath ?? null,
+          createRecoveryKey: opts.createRecoveryKey,
+          initialState: normalizedNext,
+          rememberKeyfile: opts.rememberKeyfile,
+        });
+        nextStatus = created.status;
+        recoveryKeyToShow = created.recoveryKey ?? null;
+        lastSavedJsonRef.current = JSON.stringify(normalizedNext);
+      } else if (vaultStatus?.unlocked && opts.vaultPassphrase) {
+        nextStatus = await changeVaultCredentials({
+          newPassphrase: opts.vaultPassphrase,
+          newKeyfilePath: opts.keyfilePath ?? null,
+          rekeyDek: false,
+          rememberKeyfile: opts.rememberKeyfile,
+          currentState: normalizedNext,
+        });
+      }
+
+      if (opts.enrollWindowsHello && nextStatus?.windowsHelloAvailable && !nextStatus.deviceSlotEnrolled) {
+        try {
+          nextStatus = await enrollDeviceUnlock();
+        } catch (helloErr) {
+          console.warn('Windows Hello enrollment skipped during setup:', helloErr);
+        }
+      }
+
+      nextStatus = await saveAuthSettings({
+        autoPromptDevice: true,
+        autoLockMinutes: opts.autoLockMinutes,
+        lockOnMinimize: opts.lockOnMinimize,
+      });
+
+      setVaultStatus(nextStatus);
+      setSaveBlocked(false);
+      setIsLocked(false);
+      setShowSetupModal(false);
+      if (recoveryKeyToShow) {
+        setPendingRecoveryKey(recoveryKeyToShow);
+      }
+      showNotification(
+        opts.skipAccountsSetup
+          ? 'Koban setup complete (Vault Format v2 encrypted).'
+          : 'Koban setup, accounts, and Vault Format v2 configured.'
+      );
+    } catch (err) {
+      showNotification(`Vault setup failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    setShowSetupModal(false);
-    showNotification(
-      opts.skipAccountsSetup
-        ? 'Koban setup complete (Account setup skipped for later).'
-        : 'Koban setup, accounts, and encrypted vault configured.'
-    );
-  };
-
-  const handleUpdateVaultPassphrase = async (passphrase: string | null) => {
-    const info = await updateVaultPassphrase(passphrase, state);
-    // Keeps the lock screen's "this vault has its own passphrase" check in step.
-    setHasCustomDbPassphrase(Boolean(info?.has_custom_passphrase));
-    showNotification(
-      passphrase
-        ? 'Updated AES-256-GCM vault to use your custom passphrase.'
-        : 'Reverted AES-256-GCM vault to default key.'
-    );
   };
 
   const handleUpdateBudget = (categoryId: string, newBudget: number) => {
@@ -1696,12 +1844,21 @@ export function App() {
     }
   };
 
-  const handleRestoreFromPath = async (path: string, passphrase?: string) => {
+  const handleRestoreFromPath = async (
+    path: string,
+    passphrase?: string,
+    keyfilePath?: string
+  ) => {
     try {
       const shouldPreview =
         state.settings.confirmAndPreviewBeforeImport ?? true;
       if (shouldPreview) {
-        const restored = await restoreFromBackupFile(path, passphrase, true);
+        const restored = await restoreFromBackupFile(
+          path,
+          passphrase,
+          true,
+          keyfilePath
+        );
         const fileName = path.split(/[\\/]/).pop() || path;
         const count =
           (restored.categories?.length ?? 0) +
@@ -1721,7 +1878,12 @@ export function App() {
         setShowImportModal(true);
         return;
       }
-      const restored = await restoreFromBackupFile(path, passphrase, false);
+      const restored = await restoreFromBackupFile(
+        path,
+        passphrase,
+        false,
+        keyfilePath
+      );
       // The local DB was replaced: it no longer matches the last WebDAV sync.
       webdavSync.resetLink();
       setState(keepDeviceSettings(restored, latestStateRef.current));
@@ -1775,6 +1937,7 @@ export function App() {
     kind: ImportKind;
     targetMode: LedgerMode;
     passphrase?: string;
+    keyfilePath?: string;
     browserFile?: File;
   }): Promise<ImportPreviewData | null> => {
     try {
@@ -1789,7 +1952,8 @@ export function App() {
           const restored = await restoreFromBackupFile(
             picked,
             opts.passphrase,
-            true
+            true,
+            opts.keyfilePath
           );
           const count =
             (restored.categories?.length ?? 0) +
@@ -1896,7 +2060,12 @@ export function App() {
     }
     setState(keepDeviceSettings(preview.proposedState, latestStateRef.current));
     setShowImportModal(false);
-    setShowSetupModal(false);
+    if (!vaultStatus?.unlocked) {
+      setShowSetupModal(true);
+    } else {
+      setSaveBlocked(false);
+      setShowSetupModal(false);
+    }
 
     if (preview.kind === 'database_backup') {
       showNotification(
@@ -1934,25 +2103,21 @@ export function App() {
       );
       webdavSync.resetLink();
       pendingWebDavRef.current = entered;
-      const dbInfo = await getDatabaseInfo().catch(() => null);
-      const customPass = Boolean(dbInfo?.has_custom_passphrase);
-      const loaded = customPass ? null : await loadLedgerFromDb();
-
-      if (loaded && loaded.settings) {
-        applyLoadedLedger(loaded);
-        setSaveBlocked(false);
-        setHasCustomDbPassphrase(false);
-        setShowWebDavOpenModal(false);
-        setShowSetupModal(!loaded.settings.setupCompleted);
-        showNotification('Opened the vault from WebDAV. This device now uses it as primary storage.');
-        return;
+      const st = await getVaultStatus().catch(() => null);
+      setVaultStatus(st);
+      if (st?.unlocked) {
+        const loaded = await loadLedgerFromDb();
+        if (loaded && loaded.settings) {
+          applyLoadedLedger(loaded);
+          setSaveBlocked(false);
+          setShowWebDavOpenModal(false);
+          setShowSetupModal(!loaded.settings.setupCompleted);
+          showNotification('Opened the vault from WebDAV. This device now uses it as primary storage.');
+          return;
+        }
       }
-      if (customPass) {
-        // Passphrase-protected vault: unlock via the normal lock screen; the WebDAV settings
-        // are applied right after the ledger is decrypted (handleUnlockSuccess).
+      if (st?.exists) {
         setSaveBlocked(true);
-        setHasCustomDbPassphrase(true);
-        setAuthConfig((prev) => ({ ...prev, enabled: true }));
         setShowWebDavOpenModal(false);
         setShowSetupModal(false);
         setIsLocked(true);
@@ -1970,13 +2135,28 @@ export function App() {
         t.mode === state.settings.activeWorkspace)
   ).length;
 
-  if (isLoaded && isLocked) {
+  if (isLoaded && isLocked && vaultStatus) {
     return (
-      <AuthLockScreen
-        authConfig={authConfig}
-        hasCustomDbPassphrase={hasCustomDbPassphrase}
-        onUnlockSuccess={handleUnlockSuccess}
-      />
+      <>
+        <AuthLockScreen
+          vaultStatus={vaultStatus}
+          onUnlocked={handleVaultUnlocked}
+          onMigrated={handleVaultMigrated}
+          onOpenWebDavVault={() => setShowWebDavOpenModal(true)}
+          onVaultFileSwitched={refreshInitialVaultState}
+        />
+        <WebDavOpenVaultModal
+          isOpen={showWebDavOpenModal}
+          onClose={() => setShowWebDavOpenModal(false)}
+          onDownloadAndOpen={handleOpenVaultFromWebDav}
+        />
+        {pendingRecoveryKey && (
+          <RecoveryKeyModal
+            recoveryKey={pendingRecoveryKey}
+            onConfirm={() => setPendingRecoveryKey(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -1998,7 +2178,7 @@ export function App() {
         onOpenSetupWizard={() => setShowSetupModal(true)}
         onOpenImportModal={() => setShowImportModal(true)}
         onOpenSettings={() => setActiveTab('settings')}
-        onLockVault={() => setIsLocked(true)}
+        onLockVault={() => void lockVaultNow()}
         onExportExcel={handleExportExcel}
         onExportBudgetCsv={handleExportBudgetCsv}
         onExportTransactionsCsv={handleExportTransactionsCsv}
@@ -2213,8 +2393,9 @@ export function App() {
           {activeTab === 'backups' && (
             <BackupsExportView
               settings={state.settings}
+              vaultStatus={vaultStatus}
               onUpdateBackupSettings={updateSettings}
-              onUpdateVaultPassphrase={handleUpdateVaultPassphrase}
+              onOpenSecuritySettings={() => setActiveTab('settings')}
               onManualBackup={handleManualBackup}
               onRestoreFromPath={handleRestoreFromPath}
               onExportExcel={handleExportExcel}
@@ -2229,10 +2410,12 @@ export function App() {
           {activeTab === 'settings' && (
             <SettingsView
               settings={state.settings}
-              authConfig={authConfig}
+              ledgerState={state}
+              vaultStatus={vaultStatus}
               onUpdateSettings={updateSettings}
-              onUpdateAuthConfig={handleUpdateAuthConfig}
-              onLockVaultNow={() => setIsLocked(true)}
+              onVaultStatusUpdated={(next) => setVaultStatus(next)}
+              onShowRecoveryKey={(key) => setPendingRecoveryKey(key)}
+              onLockVaultNow={() => void lockVaultNow()}
               onOpenSetupWizard={() => setShowSetupModal(true)}
               onOpenBackupsTab={() => setActiveTab('backups')}
               onReloadLedgerState={handleReloadLedgerState}
@@ -2250,15 +2433,20 @@ export function App() {
         isOpen={showSetupModal}
         currentSettings={state.settings}
         existingAccounts={state.accounts ?? []}
-        authConfig={authConfig}
-        hasCustomDbPassphrase={hasCustomDbPassphrase}
-        onUpdateAuthConfig={handleUpdateAuthConfig}
+        vaultStatus={vaultStatus}
         onUpdateLanguage={(code) => updateSettings({ language: code })}
         onCompleteSetup={handleCompleteSetup}
         onOpenImportModal={() => setShowImportModal(true)}
         onOpenWebDavVault={() => setShowWebDavOpenModal(true)}
         onClose={() => setShowSetupModal(false)}
       />
+
+      {pendingRecoveryKey && (
+        <RecoveryKeyModal
+          recoveryKey={pendingRecoveryKey}
+          onConfirm={() => setPendingRecoveryKey(null)}
+        />
+      )}
 
       {/* New device: open an existing vault from WebDAV */}
       <WebDavOpenVaultModal
