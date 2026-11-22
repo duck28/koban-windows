@@ -12,7 +12,7 @@ export interface UpdateCheckResult {
   published_at?: string | null;
 }
 
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.5.0';
 export const GITHUB_RELEASES_URL =
   'https://github.com/duck28/koban-windows/releases';
 const GITHUB_RELEASES_API =

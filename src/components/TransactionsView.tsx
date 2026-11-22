@@ -10,6 +10,7 @@ import {
   Filter,
   Landmark,
   X,
+  Tag,
 } from 'lucide-react';
 import {
   ActiveWorkspace,
@@ -38,6 +39,7 @@ interface TransactionsViewProps {
   onAddTransaction: (tx: Omit<TransactionItem, 'id'>) => void;
   onDeleteTransaction: (id: string) => void;
   onOpenImportModal: () => void;
+  onOpenImportRulesModal?: () => void;
   onExportCsv: () => void;
 }
 
@@ -57,6 +59,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onAddTransaction,
   onDeleteTransaction,
   onOpenImportModal,
+  onOpenImportRulesModal,
   onExportCsv,
 }) => {
   const { t, tf, tGroupName, tCategoryName, tAccountName } = useI18n();
@@ -252,6 +255,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <Upload className="w-3.5 h-3.5 text-indigo" />
             <span>{t('tx.importBtn')}</span>
           </button>
+
+          {onOpenImportRulesModal && (
+            <button
+              type="button"
+              onClick={onOpenImportRulesModal}
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
+            >
+              <Tag className="w-3.5 h-3.5 text-ink-3" />
+              <span>{t('bankImport.manageRulesBtn')}</span>
+            </button>
+          )}
 
           <button
             onClick={onExportCsv}
@@ -645,8 +659,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       </td>
                       <td className="py-2.5 px-3 text-right">
                         <button
+                          type="button"
                           onClick={() => onDeleteTransaction(tx.id)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-ink-3 hover:text-accent transition-opacity cursor-pointer"
+                          className="p-1 rounded border border-transparent text-ink-2/85 hover:text-accent hover:bg-accent/12 hover:border-accent/30 transition-colors cursor-pointer"
                           title={t('tx.deleteTip')}
                         >
                           <Trash2 className="w-3.5 h-3.5" />

@@ -12,15 +12,32 @@ import {
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  FolderSearch,
+  Tag,
+  Landmark,
+  Building2,
 } from 'lucide-react';
-import { LedgerMode, LedgerState } from '../types';
+import {
+  BankImportProfile,
+  ImportRule,
+  LedgerMode,
+  LedgerState,
+  PendingImportFile,
+} from '../types';
 import {
   BudgetImportPreviewRow,
   TransactionImportPreviewRow,
 } from '../utils/exportImport';
+import {
+  BankStatementParseResult,
+  BUILTIN_BANK_PROFILES,
+  StagedBankTransaction,
+} from '../utils/bankImport';
 import { formatCurrency, formatNumber } from '../utils/calculations';
 import { useI18n } from '../i18n';
 import { KeyFileSelector } from './KeyFileSelector';
+import { BankImportReview } from './BankImportReview';
+import { KobanSelect, KobanSelectOption } from './KobanSelect';
 
 export type ImportKind = 'budget_sheet' | 'transactions' | 'database_backup';
 
@@ -34,10 +51,14 @@ export interface ImportPreviewData {
   budgetRows?: BudgetImportPreviewRow[];
   transactionRows?: TransactionImportPreviewRow[];
   backupPath?: string;
+  accountId?: string;
+  watchedFilePath?: string;
+  bankParseResult?: BankStatementParseResult;
 }
 
 interface ImportDataModalProps {
   isOpen: boolean;
+  ledgerState: LedgerState;
   defaultMode: LedgerMode;
   monthKey: string;
   currency: string;
@@ -45,20 +66,38 @@ interface ImportDataModalProps {
   onToggleConfirmAndPreview: (enabled: boolean) => void;
   initialPreviewData?: ImportPreviewData | null;
   onClearInitialPreview?: () => void;
+  importWatchDir?: string;
+  pendingImportFiles?: PendingImportFile[];
+  initialPendingFilePath?: string | null;
+  onClearInitialPendingFilePath?: () => void;
+  onPickImportWatchDir?: () => Promise<void>;
+  onClearImportWatchDir?: () => void;
+  onOpenRulesModal?: () => void;
   onClose: () => void;
   onPrepareImport: (options: {
     kind: ImportKind;
     targetMode: LedgerMode;
+    accountId?: string;
+    selectedProfileId?: string;
     passphrase?: string;
     keyfilePath?: string;
+    filePath?: string;
     browserFile?: File;
   }) => Promise<ImportPreviewData | null>;
   onCommitImport: (preview: ImportPreviewData) => Promise<void>;
+  onCommitBankImport?: (params: {
+    preview: ImportPreviewData;
+    stagedRows: StagedBankTransaction[];
+    savedProfile?: BankImportProfile;
+    savedRules: ImportRule[];
+    archiveWatchedFile: boolean;
+  }) => Promise<void>;
   isTauri: boolean;
 }
 
 export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   isOpen,
+  ledgerState,
   defaultMode,
   monthKey,
   currency,
@@ -66,14 +105,26 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
   onToggleConfirmAndPreview,
   initialPreviewData,
   onClearInitialPreview,
+  importWatchDir = '',
+  pendingImportFiles = [],
+  initialPendingFilePath,
+  onClearInitialPendingFilePath,
+  onPickImportWatchDir,
+  onClearImportWatchDir,
+  onOpenRulesModal,
   onClose,
   onPrepareImport,
   onCommitImport,
+  onCommitBankImport,
   isTauri,
 }) => {
   const { t, tf, tGroupName, tCategoryName, tAccountName, tAccClass } = useI18n();
-  const [importKind, setImportKind] = useState<ImportKind>('budget_sheet');
+  const [importKind, setImportKind] = useState<ImportKind>('transactions');
   const [targetMode, setTargetMode] = useState<LedgerMode>(defaultMode);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    () => ledgerState.accounts?.[0]?.id ?? ''
+  );
+  const [selectedBankId, setSelectedBankId] = useState<string>('auto');
   const [passphrase, setPassphrase] = useState('');
   const [keyfilePath, setKeyfilePath] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -92,6 +143,84 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
       setExcludedRowIds(new Set());
     }
   }, [initialPreviewData]);
+
+  useEffect(() => {
+    if (!isOpen || !initialPendingFilePath) return;
+    let active = true;
+    setImportKind('transactions');
+    setIsBusy(true);
+    void onPrepareImport({
+      kind: 'transactions',
+      targetMode,
+      accountId: selectedAccountId || undefined,
+      selectedProfileId: selectedBankId,
+      filePath: initialPendingFilePath,
+    }).then((prepared) => {
+      if (!active) return;
+      if (prepared) setPreviewData(prepared);
+      onClearInitialPendingFilePath?.();
+      setIsBusy(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, initialPendingFilePath]);
+
+  const handleSelectAccount = (accId: string) => {
+    setSelectedAccountId(accId);
+    const acc = ledgerState.accounts.find((a) => a.id === accId);
+    if (acc) {
+      setTargetMode(acc.mode);
+    }
+    const scopedProfile = (ledgerState.importProfiles ?? []).find(
+      (p) => accId && p.accountId === accId
+    );
+    if (scopedProfile) {
+      setSelectedBankId(scopedProfile.id);
+    }
+  };
+
+  const accountOptions: KobanSelectOption[] = useMemo(
+    () => [
+      { value: '', label: t('bankImport.noAccountOption') },
+      ...ledgerState.accounts.map((acc) => ({
+        value: acc.id,
+        label: `${tAccountName(acc)} (${acc.mode})`,
+      })),
+    ],
+    [ledgerState.accounts, t, tAccountName]
+  );
+
+  const bankFormatOptions: KobanSelectOption[] = useMemo(() => {
+    const opts: KobanSelectOption[] = [
+      {
+        value: 'auto',
+        label: t('bankImport.autoDetectBank'),
+        subtitle: 'CAMT.053 XML, OFX/QFX, Swiss/EU bank CSVs & Excel',
+      },
+    ];
+    for (const p of ledgerState.importProfiles ?? []) {
+      opts.push({
+        value: p.id,
+        label: p.name,
+        group: t('bankImport.savedProfilesGroup'),
+        subtitle: `${p.dateColumn} · ${p.amountMode === 'split_debit_credit' ? 'Split Debit/Credit' : 'Signed Amount'}`,
+      });
+    }
+    for (const b of BUILTIN_BANK_PROFILES) {
+      opts.push({
+        value: b.id,
+        label: b.name,
+        group: t('bankImport.supportedBanksGroup'),
+      });
+    }
+    opts.push({
+      value: 'custom',
+      label: t('bankImport.customManualMapping'),
+      group: 'Manual',
+    });
+    return opts;
+  }, [ledgerState.importProfiles, t]);
 
   const toggleRowInclusion = (id: string) => {
     setExcludedRowIds((prev) => {
@@ -185,19 +314,25 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     onClose();
   };
 
-  const executeFileSelection = async (browserFile?: File) => {
+  const executeFileSelection = async (
+    browserFile?: File,
+    directFilePath?: string
+  ) => {
     setIsBusy(true);
     try {
       const prepared = await onPrepareImport({
         kind: importKind,
         targetMode,
+        accountId: selectedAccountId || undefined,
+        selectedProfileId: selectedBankId,
         passphrase: passphrase || undefined,
         keyfilePath: keyfilePath || undefined,
+        filePath: directFilePath,
         browserFile,
       });
       if (!prepared) return;
 
-      if (confirmAndPreviewBeforeImport) {
+      if (confirmAndPreviewBeforeImport || prepared.bankParseResult) {
         // Show Preview & Confirmation Step
         setPreviewData(prepared);
       } else {
@@ -313,7 +448,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
       id: 'transactions',
       title: t('import.transactions'),
       subtitle: t('import.transactionsDesc'),
-      formats: '.csv, .xlsx, .xls',
+      formats: '.xml, .ofx, .csv, .xlsx',
       icon: ReceiptText,
       accent: 'text-indigo',
     },
@@ -331,7 +466,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div
         className={`w-full ${
-          previewData ? 'max-w-4xl' : 'max-w-xl'
+          previewData ? 'max-w-5xl' : 'max-w-xl'
         } bg-surface border border-line rounded-2xl shadow-2xl overflow-hidden my-auto transition-all`}
       >
         <input
@@ -340,7 +475,9 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           accept={
             importKind === 'database_backup'
               ? '.db,.sqlite,.json'
-              : '.xlsx,.xls,.csv'
+              : importKind === 'transactions'
+                ? '.xml,.ofx,.qfx,.csv,.xlsx,.xls'
+                : '.xlsx,.xls,.csv'
           }
           onChange={handleBrowserFileChange}
           className="hidden"
@@ -383,7 +520,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
         {/* Body */}
         {!previewData ? (
           /* ================= STEP 1: CHOOSE SOURCE & FILE ================= */
-          <div className="p-6 space-y-5">
+          <div className="p-6 space-y-4">
             {/* 1. Select Import Type */}
             <div className="space-y-2">
               <label className="block text-xs uppercase tracking-[0.12em] text-ink-3 font-medium">
@@ -431,41 +568,164 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               </div>
             </div>
 
-            {/* 2. Target Workspace or Backup Passphrase */}
+            {/* 2. Target Workspace / Account / Watched Folder / Backup Passphrase */}
             {importKind !== 'database_backup' ? (
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-app border border-line">
-                <div>
-                  <div className="text-xs font-medium text-ink">
-                    {tf('import.targetWorkspace', { month: monthKey })}
+              <div className="space-y-2.5">
+                {importKind === 'transactions' && (
+                  <>
+                    <div className="p-3.5 rounded-xl bg-app border border-line flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Landmark className="w-4 h-4 text-indigo shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-ink">
+                            {t('bankImport.targetAccountLabel')}
+                          </div>
+                          <p className="text-[11px] text-ink-3 truncate">
+                            Used for balance tracking, deduplication, and saved CSV profiles.
+                          </p>
+                        </div>
+                      </div>
+                      <KobanSelect
+                        value={selectedAccountId}
+                        onChange={handleSelectAccount}
+                        options={accountOptions}
+                        tone="surface"
+                        size="sm"
+                        className="w-56 shrink-0"
+                      />
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-app border border-line flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Building2 className="w-4 h-4 text-positive shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-ink">
+                            {t('bankImport.bankFormatLabel')}
+                          </div>
+                          <p className="text-[11px] text-ink-3 truncate">
+                            {t('bankImport.bankFormatDesc')}
+                          </p>
+                        </div>
+                      </div>
+                      <KobanSelect
+                        value={selectedBankId}
+                        onChange={setSelectedBankId}
+                        options={bankFormatOptions}
+                        tone="surface"
+                        size="sm"
+                        searchable
+                        searchPlaceholder="Search bank (UBS, PostFinance, ZKB, Revolut…)"
+                        className="w-56 shrink-0"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="flex items-center justify-between p-3.5 rounded-xl bg-app border border-line">
+                  <div>
+                    <div className="text-xs font-medium text-ink">
+                      {tf('import.targetWorkspace', { month: monthKey })}
+                    </div>
+                    <p className="text-[11px] text-ink-3">
+                      {t('import.targetWorkspaceDesc')}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-ink-3">
-                    {t('import.targetWorkspaceDesc')}
-                  </p>
+                  <div className="flex items-center bg-raised p-0.5 rounded-lg border border-line text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setTargetMode('home')}
+                      className={`px-3 py-1 rounded-md cursor-pointer ${
+                        targetMode === 'home'
+                          ? 'bg-surface text-ink font-medium shadow-2xs'
+                          : 'text-ink-2 hover:text-ink'
+                      }`}
+                    >
+                      {t('onboarding.home')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetMode('freelancer')}
+                      className={`px-3 py-1 rounded-md cursor-pointer ${
+                        targetMode === 'freelancer'
+                          ? 'bg-surface text-ink font-medium shadow-2xs'
+                          : 'text-ink-2 hover:text-ink'
+                      }`}
+                    >
+                      {t('workspace.freelancer')}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center bg-raised p-0.5 rounded-lg border border-line text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setTargetMode('home')}
-                    className={`px-3 py-1 rounded-md cursor-pointer ${
-                      targetMode === 'home'
-                        ? 'bg-surface text-ink font-medium shadow-2xs'
-                        : 'text-ink-2 hover:text-ink'
-                    }`}
-                  >
-                    {t('onboarding.home')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTargetMode('freelancer')}
-                    className={`px-3 py-1 rounded-md cursor-pointer ${
-                      targetMode === 'freelancer'
-                        ? 'bg-surface text-ink font-medium shadow-2xs'
-                        : 'text-ink-2 hover:text-ink'
-                    }`}
-                  >
-                    {t('workspace.freelancer')}
-                  </button>
-                </div>
+
+                {importKind === 'transactions' && isTauri && (
+                  <div className="p-3.5 rounded-xl bg-app border border-line space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FolderSearch className="w-4 h-4 text-positive shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-ink">
+                            {t('bankImport.watchFolderTitle')}
+                          </div>
+                          <p className="text-[11px] text-ink-3 truncate">
+                            {importWatchDir || t('bankImport.watchFolderDesc')}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {importWatchDir && onClearImportWatchDir && (
+                          <button
+                            type="button"
+                            onClick={onClearImportWatchDir}
+                            className="h-7 px-2 rounded border border-line text-[11px] text-ink-2 hover:text-ink cursor-pointer"
+                          >
+                            {t('common.clear')}
+                          </button>
+                        )}
+                        {onPickImportWatchDir && (
+                          <button
+                            type="button"
+                            onClick={() => void onPickImportWatchDir()}
+                            className="h-7 px-2.5 rounded bg-surface border border-line text-[11px] text-ink hover:bg-raised cursor-pointer"
+                          >
+                            {t('bankImport.chooseWatchFolder')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {pendingImportFiles.length > 0 && (
+                      <div className="space-y-1.5 pt-1 border-t border-line/70">
+                        <div className="text-[10px] uppercase tracking-wider text-ink-3 font-medium">
+                          {t('bankImport.pendingFilesTitle').replace(
+                            '{count}',
+                            String(pendingImportFiles.length)
+                          )}
+                        </div>
+                        <div className="max-h-28 overflow-y-auto space-y-1">
+                          {pendingImportFiles.map((f) => (
+                            <div
+                              key={f.path}
+                              className="px-2.5 py-1.5 rounded-lg bg-surface border border-line flex items-center justify-between gap-2 text-xs"
+                            >
+                              <span className="truncate font-medium text-ink">
+                                {f.name}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  void executeFileSelection(undefined, f.path)
+                                }
+                                className="h-6 px-2.5 rounded bg-ink text-on-ink text-[11px] font-medium cursor-pointer shrink-0"
+                              >
+                                {t('bankImport.reviewNowBtn')}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="p-3.5 rounded-xl bg-app border border-line space-y-2">
@@ -495,56 +755,113 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             )}
 
             {/* 3. Preview & Confirmation Behavior Toggle */}
-            <label className="flex items-start justify-between gap-3 p-3 rounded-xl bg-app/70 border border-line cursor-pointer">
-              <div className="flex items-start gap-2.5">
-                <Eye className="w-4 h-4 text-indigo shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-xs font-medium text-ink">
-                    {t('import.previewToggleTitle')}
+            {importKind !== 'transactions' && (
+              <label className="flex items-start justify-between gap-3 p-3 rounded-xl bg-app/70 border border-line cursor-pointer">
+                <div className="flex items-start gap-2.5">
+                  <Eye className="w-4 h-4 text-indigo shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-medium text-ink">
+                      {t('import.previewToggleTitle')}
+                    </div>
+                    <p className="text-[11px] text-ink-3 mt-0.5">
+                      {t('import.previewToggleDesc')}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-ink-3 mt-0.5">
-                    {t('import.previewToggleDesc')}
-                  </p>
                 </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={confirmAndPreviewBeforeImport}
-                onChange={(e) => onToggleConfirmAndPreview(e.target.checked)}
-                className="mt-0.5 rounded border-line"
-              />
-            </label>
+                <input
+                  type="checkbox"
+                  checked={confirmAndPreviewBeforeImport}
+                  onChange={(e) => onToggleConfirmAndPreview(e.target.checked)}
+                  className="mt-0.5 rounded border-line"
+                />
+              </label>
+            )}
 
             {/* Footer */}
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={handleCloseAll}
-                className="h-9 px-4 rounded-lg text-xs text-ink-2 hover:text-ink hover:bg-raised cursor-pointer"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={handleActionClick}
-                className="h-9 px-5 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
-              >
-                {confirmAndPreviewBeforeImport ? (
-                  <Eye className="w-3.5 h-3.5" />
-                ) : (
-                  <Upload className="w-3.5 h-3.5" />
+            <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-line">
+              <div>
+                {importKind === 'transactions' && onOpenRulesModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenRulesModal}
+                    className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised cursor-pointer"
+                  >
+                    <Tag className="w-3.5 h-3.5" />
+                    <span>{t('bankImport.manageRulesBtn')}</span>
+                  </button>
                 )}
-                <span>
-                  {isBusy
-                    ? t('import.readingFile')
-                    : confirmAndPreviewBeforeImport
-                      ? t('import.selectFile')
-                      : t('import.selectImmediate')}
-                </span>
-              </button>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleCloseAll}
+                  className="h-9 px-4 rounded-lg text-xs text-ink-2 hover:text-ink hover:bg-raised cursor-pointer"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={handleActionClick}
+                  className="h-9 px-5 inline-flex items-center gap-2 rounded-lg bg-ink text-on-ink text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                >
+                  {confirmAndPreviewBeforeImport || importKind === 'transactions' ? (
+                    <Eye className="w-3.5 h-3.5" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {isBusy
+                      ? t('import.readingFile')
+                      : confirmAndPreviewBeforeImport || importKind === 'transactions'
+                        ? t('import.selectFile')
+                        : t('import.selectImmediate')}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
+        ) : previewData.kind === 'transactions' &&
+          previewData.bankParseResult &&
+          onCommitBankImport ? (
+          <BankImportReview
+            parseResult={previewData.bankParseResult}
+            state={ledgerState}
+            targetMode={previewData.targetMode}
+            accountId={previewData.accountId}
+            currency={currency}
+            watchedFilePath={previewData.watchedFilePath}
+            isBusy={isBusy}
+            onBack={() => {
+              setPreviewData(null);
+              setExcludedRowIds(new Set());
+              onClearInitialPreview?.();
+            }}
+            onCancel={handleCloseAll}
+            onConfirmCommit={async ({
+              stagedRows,
+              savedProfile,
+              savedRules,
+              archiveWatchedFile,
+            }) => {
+              setIsBusy(true);
+              try {
+                await onCommitBankImport({
+                  preview: previewData,
+                  stagedRows,
+                  savedProfile,
+                  savedRules,
+                  archiveWatchedFile,
+                });
+                setPreviewData(null);
+                setExcludedRowIds(new Set());
+                onClearInitialPreview?.();
+              } finally {
+                setIsBusy(false);
+              }
+            }}
+          />
         ) : (
           /* ================= STEP 2: DATA PREVIEW & CONFIRMATION ================= */
           <div className="p-6 space-y-4">

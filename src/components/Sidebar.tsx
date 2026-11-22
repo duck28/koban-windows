@@ -13,10 +13,10 @@ import {
   ExternalLink,
   CheckCircle2,
   AlertCircle,
-  Sparkles,
 } from 'lucide-react';
 import { AppSettings, ViewTab } from '../types';
 import { useI18n } from '../i18n';
+import { APP_VERSION } from '../utils/updater';
 import {
   formatCurrency,
   MonthSummaryMetrics,
@@ -34,7 +34,6 @@ interface SidebarProps {
   recurringCount: number;
   goalsCount: number;
   onRevealBackupDir: () => void;
-  onOpenSetupWizard: () => void;
 }
 
 type SidePanelMode = 'nav' | 'groups';
@@ -50,7 +49,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   recurringCount,
   goalsCount,
   onRevealBackupDir,
-  onOpenSetupWizard,
 }) => {
   const [panelMode, setPanelMode] = useState<SidePanelMode>('nav');
   const { t, tGroupName } = useI18n();
@@ -291,8 +289,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 {settings.backupDir && (
                   <button
+                    type="button"
                     onClick={onRevealBackupDir}
-                    className="text-ink-3 hover:text-ink cursor-pointer"
+                    className="p-0.5 rounded text-ink-2/85 hover:text-ink hover:bg-surface transition-colors cursor-pointer"
                     title={t('sidebar.revealBackupWin')}
                   >
                     <ExternalLink className="w-3 h-3" />
@@ -313,13 +312,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </p>
             </div>
 
-            <button
-              onClick={onOpenSetupWizard}
-              className="w-full h-7 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-md text-[11px] text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
-            >
-              <Sparkles className="w-3 h-3 text-accent" />
-              <span>{t('sidebar.rerunSetup')}</span>
-            </button>
+            <div className="w-full h-7 px-2.5 flex items-center justify-center text-[11px] text-ink-2/85 tabular-nums tracking-wide select-text">
+              Koban v{APP_VERSION}
+            </div>
           </div>
         </div>
       ) : (

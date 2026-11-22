@@ -136,7 +136,92 @@ export interface TransactionItem {
   status?: 'cleared' | 'pending' | 'invoiced';
   notes?: string;
   recurringId?: string;
+  /** Unique bank-assigned transaction reference (camt.053 AcctSvcrRef/NtryRef or OFX FITID) */
+  externalId?: string;
+  /** Deterministic statement deduplication fingerprint (includes same-day occurrence index) */
+  importFingerprint?: string;
+  /** Untouched original description from the imported bank statement */
+  rawDescription?: string;
+  /** Linked peer transaction ID when marked as an internal cross-account transfer */
+  transferPeerId?: string;
 }
+
+export type BankDateFormat =
+  | 'auto'
+  | 'YYYY-MM-DD'
+  | 'DD.MM.YYYY'
+  | 'DD/MM/YYYY'
+  | 'MM/DD/YYYY'
+  | 'YYYYMMDD';
+
+export type BankAmountMode = 'signed' | 'split_debit_credit';
+
+export type BankDecimalSeparator = 'auto' | '.' | ',';
+
+export interface BankImportProfile {
+  id: string;
+  name: string;
+  accountId?: string;
+  defaultMode?: LedgerMode;
+  headerFingerprint: string[];
+  delimiter?: string;
+  dateColumn: string;
+  dateFormat: BankDateFormat;
+  amountMode: BankAmountMode;
+  amountColumn?: string;
+  debitColumn?: string;
+  creditColumn?: string;
+  invertSign: boolean;
+  decimalSeparator: BankDecimalSeparator;
+  descriptionColumns: string[];
+  payeeColumn?: string;
+  referenceColumn?: string;
+  currencyColumn?: string;
+  skipRows?: number;
+  updatedAt: string;
+}
+
+export type ImportRuleDirection = 'any' | 'income' | 'expense';
+export type ImportRuleMatchField = 'any' | 'payee' | 'description' | 'iban';
+export type ImportRuleMatchType = 'contains' | 'starts_with' | 'exact' | 'regex';
+
+export interface ImportRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  accountId?: string;
+  direction?: ImportRuleDirection;
+  matchField: ImportRuleMatchField;
+  matchType: ImportRuleMatchType;
+  pattern: string;
+  minAmount?: number;
+  maxAmount?: number;
+  setCategoryId: string;
+  setMode?: LedgerMode;
+  setPayee?: string;
+  setClient?: string;
+  setTaxRate?: number;
+  setDeductiblePct?: number;
+  markAsTransfer?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PendingImportFile {
+  name: string;
+  path: string;
+  size: number;
+  modified: number;
+  extension: string;
+}
+
+export type RecurringFrequency =
+  | 'biweekly'
+  | 'monthly'
+  | 'bimonthly'
+  | 'quarterly'
+  | 'yearly';
 
 export interface RecurringRule {
   id: string;
@@ -146,7 +231,7 @@ export interface RecurringRule {
   accountId?: string;
   description: string;
   amount: number;
-  frequency: 'monthly' | 'quarterly' | 'yearly';
+  frequency: RecurringFrequency;
   dayOfMonth: number;
   client?: string;
   taxRate?: number;
@@ -297,6 +382,8 @@ export interface LedgerState {
   accounts: FinancialAccount[];
   netWorthSnapshots: NetWorthSnapshot[];
   yearlyPlanItems?: YearlyPlanItem[];
+  importProfiles?: BankImportProfile[];
+  importRules?: ImportRule[];
 }
 
 export interface DbInfo {

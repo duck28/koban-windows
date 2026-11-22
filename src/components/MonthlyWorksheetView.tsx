@@ -29,6 +29,7 @@ import {
 } from '../utils/calculations';
 import { formatMonthKey } from '../data/templates';
 import { useI18n } from '../i18n';
+import { KobanSelect } from './KobanSelect';
 
 interface MonthlyWorksheetViewProps {
   summary: MonthSummaryMetrics;
@@ -248,7 +249,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
     return (
       <div
         key={row.category.id}
-        className="group grid grid-cols-[1fr_84px_84px_84px_48px] items-center gap-1.5 px-3 py-1.5 border-b border-line/60 last:border-b-0 hover:bg-raised/60 transition-colors text-[12px]"
+        className="group grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-1.5 border-b border-line/60 last:border-b-0 hover:bg-raised/60 transition-colors text-[12px]"
       >
         {/* Category Name + Recurring Toggle + Optional Freelancer / Tx Badges */}
         <div className="flex items-center gap-1.5 min-w-0 pr-1">
@@ -262,10 +263,11 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           <button
             type="button"
             onClick={() => onToggleCategoryRecurring(row.category.id)}
-            className={`p-1 rounded transition-all shrink-0 cursor-pointer ${
+            aria-pressed={Boolean(row.category.isRecurring)}
+            className={`p-1 rounded transition-colors shrink-0 cursor-pointer ${
               row.category.isRecurring
-                ? 'bg-indigo/15 text-indigo hover:bg-indigo/25'
-                : 'opacity-0 group-hover:opacity-100 text-ink-3 hover:text-indigo hover:bg-indigo/10'
+                ? 'bg-indigo/18 text-indigo border border-indigo/40 hover:bg-indigo/25'
+                : 'text-ink-2/80 border border-transparent hover:text-indigo hover:bg-indigo/12 hover:border-indigo/30'
             }`}
             title={
               row.category.isRecurring
@@ -273,11 +275,11 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                 : t('worksheet.recurringEnableTip')
             }
           >
-            <Repeat className="w-3 h-3" />
+            <Repeat className="w-3.5 h-3.5" />
           </button>
           {row.txCount > 0 && row.directActual === null && (
             <span
-              className="px-1.5 py-0.2 rounded text-[10px] bg-raised text-ink-3 tabular-nums shrink-0"
+              className="px-1.5 py-0.2 rounded text-[10px] bg-raised text-ink-2 border border-line/70 tabular-nums shrink-0"
               title={tf('worksheet.txCountTip', { count: row.txCount })}
             >
               {tf('worksheet.txCountSuffix', { count: row.txCount })}
@@ -285,11 +287,12 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           )}
           {row.directActual !== null && (
             <button
+              type="button"
               onClick={() => onUpdateDirectActual(row.category.id, null)}
-              className="text-ink-3 hover:text-ink shrink-0 cursor-pointer"
+              className="p-1 rounded border border-transparent text-ink-2/85 hover:text-ink hover:bg-surface hover:border-line transition-colors shrink-0 cursor-pointer"
               title={t('worksheet.manualActualTip')}
             >
-              <RotateCcw className="w-3 h-3" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
           {row.category.mode === 'freelancer' &&
@@ -349,21 +352,23 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           {formatNumber(row.difference)}
         </div>
 
-        {/* Quick Actions on Hover */}
-        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Row Actions */}
+        <div className="flex items-center justify-end gap-0.5">
           <button
+            type="button"
             onClick={() => onQuickLogForCategory(row.category.id)}
-            className="p-1 rounded text-ink-3 hover:text-ink hover:bg-surface cursor-pointer"
+            className="p-1 rounded border border-transparent text-ink-2/85 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
             title={t('worksheet.logTxTip')}
           >
-            <Receipt className="w-3 h-3" />
+            <Receipt className="w-3.5 h-3.5" />
           </button>
           <button
+            type="button"
             onClick={() => onDeleteCategory(row.category.id)}
-            className="p-1 rounded text-ink-3 hover:text-accent hover:bg-surface cursor-pointer"
+            className="p-1 rounded border border-transparent text-ink-2/85 hover:text-accent hover:bg-accent/12 hover:border-accent/30 transition-colors cursor-pointer"
             title={t('worksheet.deleteCategoryTip')}
           >
-            <Trash2 className="w-3 h-3" />
+            <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -382,7 +387,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         className="bg-surface border border-line rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
       >
         {/* Group Header */}
-        <div className="grid grid-cols-[1fr_84px_84px_84px_48px] items-center gap-1.5 px-3 py-2.5 bg-raised/70 border-b border-line text-[11px] font-semibold tracking-wide">
+        <div className="grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-2.5 bg-raised/70 border-b border-line text-[11px] font-semibold tracking-wide">
           <div className="flex items-center gap-2 min-w-0">
             <span
               className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -392,7 +397,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               {displayGroupName}
             </span>
             {workspace === 'combined' && (
-              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-surface text-ink-3 font-normal">
+              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-surface text-ink-2 border border-line/70 font-normal">
                 {t(`workspace.${gs.group.mode}`)}
               </span>
             )}
@@ -402,20 +407,22 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           <span className="text-right text-ink-2 font-normal pr-1">{t('worksheet.diffShort')}</span>
           <div className="flex items-center justify-end gap-0.5">
             <button
+              type="button"
               onClick={() =>
                 setAddingToGroupId(isAdding ? null : gs.group.id)
               }
-              className="p-1 rounded text-ink-2 hover:text-ink hover:bg-surface cursor-pointer"
+              className="p-1 rounded border border-transparent text-ink-2 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
               title={t('worksheet.addCategoryTip')}
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
             <button
+              type="button"
               onClick={() => onDeleteGroup(gs.group.id)}
-              className="p-1 rounded text-ink-3 hover:text-accent hover:bg-surface cursor-pointer"
+              className="p-1 rounded border border-transparent text-ink-2 hover:text-accent hover:bg-accent/12 hover:border-accent/30 transition-colors cursor-pointer"
               title={t('worksheet.deleteGroupTip')}
             >
-              <Trash2 className="w-3 h-3" />
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -466,7 +473,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         )}
 
         {/* Group Total Footer (Matches Excel "Total HOME EXPENSES", etc.) */}
-        <div className="grid grid-cols-[1fr_84px_84px_84px_48px] items-center gap-1.5 px-3 py-2 bg-app/80 border-t border-line text-[12px] font-semibold">
+        <div className="grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-2 bg-app/80 border-t border-line text-[12px] font-semibold">
           <span className="text-ink truncate">{tf('worksheet.totalGroup', { group: displayGroupName })}</span>
           <span className="text-right tabular-nums text-ink-2 px-1.5">
             {formatNumber(gs.totalBudget)}
@@ -597,8 +604,9 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setCopyModalState(null)}
-                className="p-1 rounded-lg text-ink-3 hover:text-ink hover:bg-raised cursor-pointer"
+                className="p-1 rounded-lg text-ink-2 hover:text-ink hover:bg-raised cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -618,23 +626,28 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                     <label className="block text-[11px] text-ink-2 mb-1.5 font-medium">
                       {t('worksheet.copyModalScopeLabel')}
                     </label>
-                    <select
+                    <KobanSelect
                       value={copyModalState.scope}
-                      onChange={(e) =>
+                      onChange={(val) =>
                         setCopyModalState({
                           ...copyModalState,
-                          scope: e.target.value as MonthCopyScope,
+                          scope: val as MonthCopyScope,
                         })
                       }
-                      className="w-full h-8 px-2.5 rounded-lg bg-surface border border-line text-xs text-ink focus:outline-none"
-                    >
-                      <option value="budgets_and_actuals">
-                        {t('onboarding.s4.copyScopeBoth')}
-                      </option>
-                      <option value="budgets_only">
-                        {t('settings.copy.scopeBudgetsOnly')}
-                      </option>
-                    </select>
+                      tone="surface"
+                      size="sm"
+                      className="w-full"
+                      options={[
+                        {
+                          value: 'budgets_and_actuals',
+                          label: t('onboarding.s4.copyScopeBoth'),
+                        },
+                        {
+                          value: 'budgets_only',
+                          label: t('settings.copy.scopeBudgetsOnly'),
+                        },
+                      ]}
+                    />
                   </div>
 
                   <label className="flex items-center gap-2 text-ink-2 cursor-pointer">
@@ -739,42 +752,51 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               <label className="block text-[11px] text-ink-2 mb-1">
                 {t('worksheet.ledgerModeLabel')}
               </label>
-              <select
+              <KobanSelect
                 value={newGroupMode}
-                onChange={(e) => setNewGroupMode(e.target.value as LedgerMode)}
-                className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
-              >
-                <option value="home">{t('onboarding.home')}</option>
-                <option value="freelancer">{t('workspace.freelancer')}</option>
-              </select>
+                onChange={(val) => setNewGroupMode(val as LedgerMode)}
+                tone="default"
+                size="sm"
+                className="min-w-[140px]"
+                options={[
+                  { value: 'home', label: t('onboarding.home') },
+                  { value: 'freelancer', label: t('workspace.freelancer') },
+                ]}
+              />
             </div>
           )}
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">{t('worksheet.typeLabel')}</label>
-            <select
+            <KobanSelect
               value={newGroupKind}
-              onChange={(e) => setNewGroupKind(e.target.value as CategoryKind)}
-              className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
-            >
-              <option value="expense">{t('worksheet.expenseGroupOpt')}</option>
-              <option value="income">{t('worksheet.incomeGroupOpt')}</option>
-              <option value="savings">{t('worksheet.savingsGroupOpt')}</option>
-            </select>
+              onChange={(val) => setNewGroupKind(val as CategoryKind)}
+              tone="default"
+              size="sm"
+              className="min-w-[160px]"
+              options={[
+                { value: 'expense', label: t('worksheet.expenseGroupOpt') },
+                { value: 'income', label: t('worksheet.incomeGroupOpt') },
+                { value: 'savings', label: t('worksheet.savingsGroupOpt') },
+              ]}
+            />
           </div>
 
           <div>
             <label className="block text-[11px] text-ink-2 mb-1">
               {t('worksheet.columnLabel')}
             </label>
-            <select
-              value={newGroupCol}
-              onChange={(e) => setNewGroupCol(Number(e.target.value) as 0 | 1)}
-              className="h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink"
-            >
-              <option value={0}>{t('worksheet.leftColumnOpt')}</option>
-              <option value={1}>{t('worksheet.rightColumnOpt')}</option>
-            </select>
+            <KobanSelect
+              value={String(newGroupCol)}
+              onChange={(val) => setNewGroupCol(Number(val) as 0 | 1)}
+              tone="default"
+              size="sm"
+              className="min-w-[140px]"
+              options={[
+                { value: '0', label: t('worksheet.leftColumnOpt') },
+                { value: '1', label: t('worksheet.rightColumnOpt') },
+              ]}
+            />
           </div>
 
           <button

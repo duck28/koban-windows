@@ -77,6 +77,7 @@
   --warning: #616161;
   --viewer: #eaeaea;
   --on-ink: #ffffff;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -94,6 +95,7 @@
     --warning: #999999;
     --viewer: #000000;
     --on-ink: #000000;
+    color-scheme: dark;
   }
 }
 
@@ -111,6 +113,7 @@
   --warning: #999999;
   --viewer: #000000;
   --on-ink: #000000;
+  color-scheme: dark;
 }
 
 /* ==========================================================================
@@ -131,6 +134,7 @@
   --warning: #d97706;
   --viewer: #e2e8f0;
   --on-ink: #ffffff;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -148,6 +152,7 @@
     --warning: #fbbf24;
     --viewer: #070a0f;
     --on-ink: #0b0f17;
+    color-scheme: dark;
   }
 }
 
@@ -165,6 +170,7 @@
   --warning: #fbbf24;
   --viewer: #070a0f;
   --on-ink: #0b0f17;
+  color-scheme: dark;
 }
 
 /* ==========================================================================
@@ -185,6 +191,7 @@
   --warning: #c28100;
   --viewer: #e3eae1;
   --on-ink: #ffffff;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -202,6 +209,7 @@
     --warning: #facc15;
     --viewer: #080d0a;
     --on-ink: #0c1410;
+    color-scheme: dark;
   }
 }
 
@@ -219,6 +227,7 @@
   --warning: #facc15;
   --viewer: #080d0a;
   --on-ink: #0c1410;
+  color-scheme: dark;
 }
 
 /* ==========================================================================
@@ -273,6 +282,18 @@
   :focus-visible {
     outline: 1.5px solid var(--ink-2);
     outline-offset: 1px;
+  }
+  select {
+    color-scheme: inherit;
+  }
+  select option,
+  select optgroup {
+    background-color: var(--surface);
+    color: var(--ink);
+  }
+  select option:checked {
+    background-color: var(--raised);
+    color: var(--ink);
   }
 }
 

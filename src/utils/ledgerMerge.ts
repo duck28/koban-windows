@@ -1,5 +1,7 @@
 import {
+  BankImportProfile,
   FinancialAccount,
+  ImportRule,
   LedgerState,
   MergeSummary,
   MonthlyBudgetEntry,
@@ -181,6 +183,32 @@ export function mergeLedgers(
     defaultWinner
   );
 
+  const importProfiles = mergeKeyedCollection<BankImportProfile>(
+    local.importProfiles ?? [],
+    remote.importProfiles ?? [],
+    (p) => p.id,
+    (l, r) => {
+      if (r.updatedAt > l.updatedAt) return 'remote';
+      if (l.updatedAt > r.updatedAt) return 'local';
+      return fallback;
+    }
+  );
+
+  const importRules = mergeKeyedCollection<ImportRule>(
+    local.importRules ?? [],
+    remote.importRules ?? [],
+    (r) => r.id,
+    (l, r) => {
+      if (r.updatedAt > l.updatedAt) return 'remote';
+      if (l.updatedAt > r.updatedAt) return 'local';
+      return fallback;
+    }
+  );
+  importRules.items.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.id.localeCompare(b.id);
+  });
+
   const mergedSettings = {
     ...(fallback === 'remote' ? remote.settings : local.settings),
     setupCompleted:
@@ -208,7 +236,12 @@ export function mergeLedgers(
     accounts: accounts.items,
     netWorthSnapshots: snapshots.items,
     yearlyPlanItems: planItems.items,
+    importProfiles: importProfiles.items,
+    importRules: importRules.items,
   };
+
+  const importRuleChanges =
+    importProfiles.added + importProfiles.updated + importRules.added + importRules.updated;
 
   const summary: MergeSummary = {
     groupsAdded: groups.added,
@@ -216,7 +249,7 @@ export function mergeLedgers(
     budgetsMerged: monthlyBudgets.added + monthlyBudgets.updated,
     transactionsAdded: transactions.added,
     transactionsUpdated: transactions.updated,
-    rulesMerged: recurringRules.added + recurringRules.updated,
+    rulesMerged: recurringRules.added + recurringRules.updated + importRuleChanges,
     goalsMerged: savingsGoals.added + savingsGoals.updated,
     accountsMerged: accounts.added + accounts.updated,
     snapshotsMerged: snapshots.added + snapshots.updated,
@@ -230,6 +263,7 @@ export function mergeLedgers(
       transactions.updated +
       recurringRules.added +
       recurringRules.updated +
+      importRuleChanges +
       savingsGoals.added +
       savingsGoals.updated +
       accounts.added +

@@ -11,10 +11,16 @@ import {
   CategoryGroup,
   CategoryItem,
   LedgerMode,
+  RecurringFrequency,
   RecurringRule,
 } from '../types';
-import { formatCurrency } from '../utils/calculations';
+import {
+  formatCurrency,
+  getRecurringDaysInMonth,
+  recurringMonthlyEquivalent,
+} from '../utils/calculations';
 import { useI18n } from '../i18n';
+import { KobanSelect, KobanSelectOption } from './KobanSelect';
 
 interface RecurringViewProps {
   rules: RecurringRule[];
@@ -54,10 +60,28 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
   const [categoryId, setCategoryId] = useState(availCats[0]?.id ?? '');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [frequency, setFrequency] = useState<'monthly' | 'quarterly' | 'yearly'>(
-    'monthly'
-  );
+  const [frequency, setFrequency] = useState<RecurringFrequency>('monthly');
   const [dayOfMonth, setDayOfMonth] = useState('1');
+
+  const frequencyOptions: KobanSelectOption[] = [
+    { value: 'biweekly', label: t('recurring.freqBiweekly') },
+    { value: 'monthly', label: t('recurring.freqMonthly') },
+    { value: 'bimonthly', label: t('recurring.freqBimonthly') },
+    { value: 'quarterly', label: t('recurring.freqQuarterly') },
+    { value: 'yearly', label: t('recurring.freqYearly') },
+  ];
+
+  const categoryOptions: KobanSelectOption[] = groups
+    .filter((g) => modeFilter(g.mode))
+    .flatMap((grp) =>
+      availCats
+        .filter((c) => c.groupId === grp.id)
+        .map((cat) => ({
+          value: cat.id,
+          label: tCategoryName(cat),
+          group: tGroupName(grp),
+        }))
+    );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,27 +110,20 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
   const monthlyRecurringTotalIncome = visibleRules
     .filter((r) => r.active && r.type === 'income')
     .reduce(
-      (acc, r) =>
-        acc +
-        (r.frequency === 'monthly'
-          ? r.amount
-          : r.frequency === 'quarterly'
-            ? r.amount / 3
-            : r.amount / 12),
+      (acc, r) => acc + recurringMonthlyEquivalent(r.amount, r.frequency),
       0
     );
   const monthlyRecurringTotalOutflow = visibleRules
     .filter((r) => r.active && r.type === 'expense')
     .reduce(
-      (acc, r) =>
-        acc +
-        (r.frequency === 'monthly'
-          ? r.amount
-          : r.frequency === 'quarterly'
-            ? r.amount / 3
-            : r.amount / 12),
+      (acc, r) => acc + recurringMonthlyEquivalent(r.amount, r.frequency),
       0
     );
+
+  const addDayTip =
+    frequency === 'biweekly'
+      ? `${t('recurring.dayLabel')} ${getRecurringDaysInMonth('biweekly', parseInt(dayOfMonth, 10) || 1).join(' & ')}`
+      : t('recurring.dayRangeLabel');
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -138,25 +155,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
             {t('finance.category')}
           </label>
-          <select
+          <KobanSelect
             value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
-            className="w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
-          >
-            {groups
-              .filter((g) => modeFilter(g.mode))
-              .map((grp) => (
-                <optgroup key={grp.id} label={tGroupName(grp)}>
-                  {availCats
-                    .filter((c) => c.groupId === grp.id)
-                    .map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {tCategoryName(cat)}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-          </select>
+            onChange={setCategoryId}
+            options={categoryOptions}
+            searchable
+            tone="default"
+            size="sm"
+            className="w-full"
+          />
         </div>
 
         <div className="flex-[2_1_190px] min-w-[170px]">
@@ -187,23 +194,19 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           />
         </div>
 
-        <div className="flex-[1_1_115px] min-w-[105px]">
+        <div className="flex-[1_1_130px] min-w-[130px]">
           <label className="block text-[11px] text-ink-2 mb-1 truncate">
             {t('recurring.freqLabel')}
           </label>
-          <select
+          <KobanSelect
             value={frequency}
-            onChange={(e) =>
-              setFrequency(
-                e.target.value as 'monthly' | 'quarterly' | 'yearly'
-              )
-            }
-            className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
-          >
-            <option value="monthly">{t('recurring.freqMonthly')}</option>
-            <option value="quarterly">{t('recurring.freqQuarterly')}</option>
-            <option value="yearly">{t('recurring.freqYearly')}</option>
-          </select>
+            onChange={(val) => setFrequency(val as RecurringFrequency)}
+            options={frequencyOptions}
+            searchable={false}
+            tone="default"
+            size="sm"
+            className="w-full"
+          />
         </div>
 
         <div className="w-20 shrink-0">
@@ -216,6 +219,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             max="28"
             value={dayOfMonth}
             onChange={(e) => setDayOfMonth(e.target.value)}
+            title={addDayTip}
             className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink text-center tabular-nums focus:outline-none"
           />
         </div>
@@ -281,9 +285,10 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <button
+                    type="button"
                     onClick={() => onToggleRule(rule.id)}
-                    className={`cursor-pointer shrink-0 ${
-                      rule.active ? 'text-positive' : 'text-ink-3'
+                    className={`cursor-pointer shrink-0 transition-colors ${
+                      rule.active ? 'text-positive' : 'text-ink-2/65 hover:text-positive'
                     }`}
                   >
                     <CheckCircle2 className="w-4 h-4" />
@@ -310,31 +315,33 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <select
+                  <KobanSelect
                     value={rule.frequency}
-                    onChange={(e) =>
+                    onChange={(val) =>
                       onUpdateRule(rule.id, {
-                        frequency: e.target.value as
-                          | 'monthly'
-                          | 'quarterly'
-                          | 'yearly',
+                        frequency: val as RecurringFrequency,
                       })
                     }
-                    className="h-7 px-2 rounded bg-raised border border-line text-[11px] text-ink-2 focus:text-ink focus:outline-none"
+                    options={frequencyOptions}
+                    searchable={false}
+                    tone="default"
+                    size="xs"
+                    className="w-[136px]"
                     title={t('recurring.freqLabel')}
-                  >
-                    <option value="monthly">{t('recurring.freqMonthly')}</option>
-                    <option value="quarterly">{t('recurring.freqQuarterly')}</option>
-                    <option value="yearly">{t('recurring.freqYearly')}</option>
-                  </select>
+                  />
 
-                  <div className="inline-flex items-center gap-1 text-[11px] text-ink-3">
+                  <div className="inline-flex items-center gap-1 text-[11px] text-ink-2">
                     <span>{t('recurring.dayLabel')}</span>
                     <input
                       type="number"
                       min="1"
                       max="28"
                       value={rule.dayOfMonth}
+                      title={
+                        rule.frequency === 'biweekly'
+                          ? `${t('recurring.dayLabel')} ${getRecurringDaysInMonth('biweekly', rule.dayOfMonth).join(' & ')}`
+                          : t('recurring.dayLabel')
+                      }
                       onChange={(e) =>
                         onUpdateRule(rule.id, {
                           dayOfMonth: Math.min(
@@ -366,8 +373,9 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                   </div>
 
                   <button
+                    type="button"
                     onClick={() => onDeleteRule(rule.id)}
-                    className="p-1.5 rounded-lg text-ink-3 hover:text-accent hover:bg-raised transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg border border-transparent text-ink-2/85 hover:text-accent hover:bg-accent/12 hover:border-accent/30 transition-colors cursor-pointer"
                     title={t('common.delete')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />

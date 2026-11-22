@@ -6,6 +6,7 @@ import {
   ExternalChangeResult,
   KeyFileCreateResult,
   LedgerState,
+  PendingImportFile,
   SaveResult,
   V1MigrationPreview,
   VaultCreateResult,
@@ -717,6 +718,43 @@ export async function pickOpenFileDialog(
     });
   }
   return null;
+}
+
+const DEVICE_IMPORT_WATCH_DIR_KEY = 'koban_device_import_watch_dir_v1';
+
+export function getDeviceImportWatchDir(): string {
+  try {
+    return localStorage.getItem(DEVICE_IMPORT_WATCH_DIR_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function rememberDeviceImportWatchDir(dir: string): void {
+  try {
+    if (dir.trim()) {
+      localStorage.setItem(DEVICE_IMPORT_WATCH_DIR_KEY, dir.trim());
+    } else {
+      localStorage.removeItem(DEVICE_IMPORT_WATCH_DIR_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export async function scanImportFolder(watchDir: string): Promise<PendingImportFile[]> {
+  if (!isTauriEnv() || !watchDir.trim()) return [];
+  return invoke<PendingImportFile[]>('scan_import_folder', { watchDir });
+}
+
+export async function archiveImportedFile(path: string): Promise<string> {
+  if (!isTauriEnv()) return '';
+  return invoke<string>('archive_imported_file', { path });
+}
+
+export async function readBinaryFileBytes(path: string): Promise<Uint8Array> {
+  const b64 = await invoke<string>('read_binary_file', { path });
+  return base64ToUint8(b64);
 }
 
 export async function saveBinaryFile(

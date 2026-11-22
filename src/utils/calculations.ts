@@ -5,6 +5,8 @@ import {
   FinancialAccount,
   LedgerMode,
   LedgerState,
+  RecurringFrequency,
+  RecurringRule,
   TransactionItem,
 } from '../types';
 import { formatMonthKey } from '../data/templates';
@@ -520,4 +522,170 @@ export function computeNetWorthMetrics(
     liquidRunwayMonths,
     historySeries,
   };
+}
+
+export function recurringMonthlyEquivalent(
+  amount: number,
+  frequency: RecurringFrequency
+): number {
+  switch (frequency) {
+    case 'biweekly':
+      return (amount * 26) / 12;
+    case 'monthly':
+      return amount;
+    case 'bimonthly':
+      return amount / 2;
+    case 'quarterly':
+      return amount / 3;
+    case 'yearly':
+      return amount / 12;
+  }
+}
+
+export function recurringAnnualEquivalent(
+  amount: number,
+  frequency: RecurringFrequency
+): number {
+  switch (frequency) {
+    case 'biweekly':
+      return amount * 26;
+    case 'monthly':
+      return amount * 12;
+    case 'bimonthly':
+      return amount * 6;
+    case 'quarterly':
+      return amount * 4;
+    case 'yearly':
+      return amount;
+  }
+}
+
+export function recurringMonthInterval(frequency: RecurringFrequency): number {
+  switch (frequency) {
+    case 'biweekly':
+    case 'monthly':
+      return 1;
+    case 'bimonthly':
+      return 2;
+    case 'quarterly':
+      return 3;
+    case 'yearly':
+      return 12;
+  }
+}
+
+export function getRecurringDaysInMonth(
+  frequency: RecurringFrequency,
+  dayOfMonth: number
+): number[] {
+  const d = Math.min(28, Math.max(1, Math.round(dayOfMonth) || 1));
+  if (frequency === 'biweekly') {
+    return d <= 14 ? [d, d + 14] : [d - 14, d];
+  }
+  return [d];
+}
+
+function parseMonthIndex(monthKey: string): number | null {
+  const parts = monthKey.split('-');
+  if (parts.length !== 2) return null;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || month < 1 || month > 12) {
+    return null;
+  }
+  return year * 12 + (month - 1);
+}
+
+export function buildRecurringTransactionsForMonth(
+  rules: RecurringRule[],
+  existingTransactions: TransactionItem[],
+  monthKey: string,
+  workspace: ActiveWorkspace
+): { activeCount: number; newTransactions: TransactionItem[] } {
+  const activeRules = rules.filter(
+    (r) =>
+      r.active &&
+      r.amount > 0 &&
+      (workspace === 'combined' || r.mode === workspace)
+  );
+  if (activeRules.length === 0) {
+    return { activeCount: 0, newTransactions: [] };
+  }
+
+  const targetIdx = parseMonthIndex(monthKey);
+  const newTransactions: TransactionItem[] = [];
+
+  for (const r of activeRules) {
+    const interval = recurringMonthInterval(r.frequency);
+    if (interval > 1) {
+      const blockedByIntervalOrSameMonth = existingTransactions.some((tx) => {
+        if (tx.recurringId === r.id && targetIdx !== null) {
+          const txIdx = parseMonthIndex(tx.monthKey);
+          if (txIdx !== null && Math.abs(targetIdx - txIdx) < interval) {
+            return true;
+          }
+        }
+        return (
+          tx.monthKey === monthKey &&
+          (tx.recurringId === r.id ||
+            (tx.categoryId === r.categoryId &&
+              tx.description === r.description &&
+              Math.abs(tx.amount - r.amount) < 0.01))
+        );
+      });
+      if (blockedByIntervalOrSameMonth) continue;
+    }
+
+    const days = getRecurringDaysInMonth(r.frequency, r.dayOfMonth);
+    for (const day of days) {
+      const dayStr = String(day).padStart(2, '0');
+      const dateStr = `${monthKey}-${dayStr}`;
+
+      const alreadyExists =
+        r.frequency === 'biweekly'
+          ? existingTransactions.some(
+              (tx) =>
+                tx.monthKey === monthKey &&
+                tx.date === dateStr &&
+                (tx.recurringId === r.id ||
+                  (tx.categoryId === r.categoryId &&
+                    tx.description === r.description &&
+                    Math.abs(tx.amount - r.amount) < 0.01))
+            )
+          : existingTransactions.some(
+              (tx) =>
+                tx.monthKey === monthKey &&
+                (tx.recurringId === r.id ||
+                  (tx.categoryId === r.categoryId &&
+                    tx.description === r.description &&
+                    Math.abs(tx.amount - r.amount) < 0.01))
+            );
+
+      if (alreadyExists) continue;
+
+      const id =
+        r.frequency === 'biweekly'
+          ? `tx-rec-${r.id}-${monthKey}-${dayStr}`
+          : `tx-rec-${r.id}-${monthKey}`;
+
+      newTransactions.push({
+        id,
+        date: dateStr,
+        monthKey,
+        mode: r.mode,
+        type: r.type,
+        categoryId: r.categoryId,
+        description: r.description,
+        amount: r.amount,
+        client: r.client,
+        taxRate: r.taxRate,
+        deductiblePct: r.deductiblePct,
+        paymentMethod: 'Recurring Auto',
+        status: 'cleared',
+        recurringId: r.id,
+      });
+    }
+  }
+
+  return { activeCount: activeRules.length, newTransactions };
 }

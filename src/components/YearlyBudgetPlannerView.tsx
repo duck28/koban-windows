@@ -24,6 +24,7 @@ import {
   formatCurrency,
   formatNumber,
   NetWorthSummaryMetrics,
+  recurringAnnualEquivalent,
 } from '../utils/calculations';
 import {
   getDefaultReturnRateForAccount,
@@ -172,13 +173,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
     const recMap = new Map<string, number>();
     for (const r of state.recurringRules) {
       if (r.active && r.amount > 0) {
-        const annualEq =
-          r.frequency === 'monthly'
-            ? r.amount * 12
-            : r.frequency === 'quarterly'
-              ? r.amount * 4
-              : r.amount;
-        recMap.set(r.categoryId, annualEq);
+        recMap.set(r.categoryId, recurringAnnualEquivalent(r.amount, r.frequency));
       }
     }
 

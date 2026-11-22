@@ -201,6 +201,16 @@ pub struct BackupEntry {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingImportFile {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+    pub modified: u64,
+    pub extension: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WebDavSyncResult {
     pub success: bool,
     pub message: String,
@@ -3055,6 +3065,116 @@ fn read_binary_file(path: String) -> Result<String, String> {
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
+fn is_bank_statement_file_name(name: &str) -> bool {
+    if name.is_empty()
+        || name.starts_with('.')
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+    {
+        return false;
+    }
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".xml")
+        || lower.ends_with(".ofx")
+        || lower.ends_with(".qfx")
+        || lower.ends_with(".csv")
+        || lower.ends_with(".xlsx")
+        || lower.ends_with(".xls")
+}
+
+#[tauri::command]
+fn scan_import_folder(watch_dir: String) -> Result<Vec<PendingImportFile>, String> {
+    let trimmed = watch_dir.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let p = Path::new(trimmed);
+    if !p.exists() || !p.is_dir() {
+        return Ok(Vec::new());
+    }
+    grant_user_path(p);
+    let mut list = Vec::new();
+    if let Ok(entries) = fs::read_dir(p) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !is_bank_statement_file_name(&name) {
+                continue;
+            }
+            grant_user_path(&path);
+            let meta = entry.metadata().ok();
+            let extension = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            list.push(PendingImportFile {
+                name,
+                path: path.to_string_lossy().to_string(),
+                size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
+                modified: meta
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                extension,
+            });
+        }
+    }
+    list.sort_by(|a, b| b.modified.cmp(&a.modified));
+    Ok(list)
+}
+
+#[tauri::command]
+fn archive_imported_file(path: String) -> Result<String, String> {
+    let src = require_user_path(&path)?;
+    if !src.is_file() {
+        return Err("Source file does not exist.".into());
+    }
+    let file_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "Invalid file name.".to_string())?;
+    if !is_bank_statement_file_name(&file_name) {
+        return Err("Refusing to archive non-statement file.".into());
+    }
+    let parent = src
+        .parent()
+        .ok_or_else(|| "Source folder could not be resolved.".to_string())?;
+    let imported_dir = parent.join("Imported");
+    fs::create_dir_all(&imported_dir)
+        .map_err(|e| format!("Failed to create Imported folder: {}", e))?;
+
+    let mut target = imported_dir.join(&file_name);
+    if target.exists() {
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "statement".into());
+        let ext = src
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let unique = if ext.is_empty() {
+            format!("{}-{}", stem, now_secs())
+        } else {
+            format!("{}-{}.{}", stem, now_secs(), ext)
+        };
+        target = imported_dir.join(unique);
+    }
+
+    if fs::rename(&src, &target).is_err() {
+        fs::copy(&src, &target)
+            .map_err(|e| format!("Failed to copy statement to Imported folder: {}", e))?;
+        let _ = fs::remove_file(&src);
+    }
+    grant_user_path(&target);
+    Ok(target.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn write_text_file(path: String, content: String, add_bom: bool) -> Result<(), String> {
     let path = require_user_path(&path)?;
@@ -4133,6 +4253,8 @@ pub fn run() {
             pick_open_file,
             write_binary_file,
             read_binary_file,
+            scan_import_folder,
+            archive_imported_file,
             write_text_file,
             copy_db_file,
             reveal_in_explorer,
@@ -4568,5 +4690,47 @@ mod tests {
         assert!(!is_newer_version("0.2.0", "0.2.0"));
         assert!(!is_newer_version("0.2.0", "0.1.9"));
         assert!(!is_newer_version("0.1.0", "invalid"));
+    }
+
+    #[test]
+    fn scan_and_archive_import_folder_filters_and_moves_files() {
+        let dir = env::temp_dir().join(format!("koban-watch-import-test-{}", now_secs()));
+        let sub = dir.join("Imported");
+        fs::create_dir_all(&sub).unwrap();
+
+        let csv_file = dir.join("ubs-november.csv");
+        let xml_file = dir.join("camt053.xml");
+        let ofx_file = dir.join("bank.ofx");
+        let exe_file = dir.join("malware.exe");
+        let dot_file = dir.join(".hidden.csv");
+        let nested_csv = sub.join("already.csv");
+
+        fs::write(&csv_file, "Date;Amount\n2026-11-10;-12.50\n").unwrap();
+        fs::write(&xml_file, "<Document/>").unwrap();
+        fs::write(&ofx_file, "<OFX/>").unwrap();
+        fs::write(&exe_file, "MZ").unwrap();
+        fs::write(&dot_file, "hidden").unwrap();
+        fs::write(&nested_csv, "nested").unwrap();
+
+        let found = scan_import_folder(dir.to_string_lossy().to_string()).unwrap();
+        let names: Vec<String> = found.iter().map(|f| f.name.clone()).collect();
+        assert!(names.contains(&"ubs-november.csv".to_string()));
+        assert!(names.contains(&"camt053.xml".to_string()));
+        assert!(names.contains(&"bank.ofx".to_string()));
+        assert!(!names.contains(&"malware.exe".to_string()));
+        assert!(!names.contains(&".hidden.csv".to_string()));
+        assert!(!names.contains(&"already.csv".to_string()));
+
+        // Granted statement files can be archived cleanly into Imported/
+        let archived = archive_imported_file(csv_file.to_string_lossy().to_string()).unwrap();
+        assert!(!csv_file.exists());
+        assert!(Path::new(&archived).exists());
+        assert!(archived.contains("Imported"));
+
+        // Non-statement files cannot be archived
+        grant_user_path(&exe_file);
+        assert!(archive_imported_file(exe_file.to_string_lossy().to_string()).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

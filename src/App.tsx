@@ -3,14 +3,17 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   ActiveWorkspace,
   AppSettings,
+  BankImportProfile,
   CategoryGroup,
   CategoryItem,
   CategoryKind,
   FinancialAccount,
+  ImportRule,
   LedgerMode,
   LedgerState,
   MonthCopyScope,
   NetWorthSnapshot,
+  PendingImportFile,
   ProfileSetupMode,
   RecurringRule,
   SavingsGoal,
@@ -27,12 +30,15 @@ import {
   ZEN_PALETTE,
 } from './data/templates';
 import {
+  buildRecurringTransactionsForMonth,
   computeAnnualSeries,
   computeMonthSummary,
   computeNetWorthMetrics,
+  recurringMonthlyEquivalent,
 } from './utils/calculations';
 import {
   applyDeviceBackupDir,
+  archiveImportedFile,
   base64ToUint8,
   checkExternalVaultChange,
   createVault,
@@ -40,6 +46,7 @@ import {
   enrollDeviceUnlock,
   exportSqliteDatabaseCopy,
   forgetWebDavSyncState,
+  getDeviceImportWatchDir,
   getVaultStatus,
   isExternalDbModifiedError,
   isTauriEnv,
@@ -48,21 +55,27 @@ import {
   pickFolderDialog,
   pickOpenFileDialog,
   rememberDeviceBackupDir,
+  rememberDeviceImportWatchDir,
   restoreFromBackupFile,
   revealPathInExplorer,
   runManualBackup,
   saveAuthSettings,
   saveLedgerToDb,
+  scanImportFolder,
   changeVaultCredentials,
 } from './utils/storage';
 import { clearLegacyLocalAuthCache } from './utils/auth';
 import { mergeLedgers } from './utils/ledgerMerge';
 import {
+  applyStagedTransactionsToLedger,
+  parseBankStatementBuffer,
+  StagedBankTransaction,
+} from './utils/bankImport';
+import {
   exportExcelWorkbook,
   exportMonthlyBudgetCsv,
   exportTransactionsCsv,
   importBudgetSheetFromBuffer,
-  importTransactionsFromBuffer,
 } from './utils/exportImport';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -73,6 +86,7 @@ import {
   ImportKind,
   ImportPreviewData,
 } from './components/ImportDataModal';
+import { ImportRulesModal } from './components/ImportRulesModal';
 import { MonthlyWorksheetView } from './components/MonthlyWorksheetView';
 import { YearlyBudgetPlannerView } from './components/YearlyBudgetPlannerView';
 import { TransactionsView } from './components/TransactionsView';
@@ -95,7 +109,7 @@ import {
   checkForAppUpdates,
   openExternalUrl,
 } from './utils/updater';
-import { CheckCircle2, Download, ExternalLink, X } from 'lucide-react';
+import { CheckCircle2, Download, ExternalLink, FolderSearch, X } from 'lucide-react';
 import { useI18n } from './i18n';
 import './App.css';
 
@@ -112,6 +126,8 @@ function normalizeLedger(loaded: LedgerState): LedgerState {
       createDefaultOnboardingAccounts(loaded.settings.setupMode || 'both'),
     netWorthSnapshots: loaded.netWorthSnapshots ?? [],
     yearlyPlanItems: loaded.yearlyPlanItems ?? [],
+    importProfiles: loaded.importProfiles ?? [],
+    importRules: loaded.importRules ?? [],
   };
 }
 
@@ -185,11 +201,58 @@ export function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>('worksheet');
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportRulesModal, setShowImportRulesModal] = useState(false);
+  const [importWatchDir, setImportWatchDir] = useState<string>(() =>
+    getDeviceImportWatchDir()
+  );
+  const [pendingImportFiles, setPendingImportFiles] = useState<PendingImportFile[]>([]);
+  const [importBannerDismissed, setImportBannerDismissed] = useState(false);
+  const [initialPendingFilePath, setInitialPendingFilePath] = useState<string | null>(
+    null
+  );
   const [pendingImportPreview, setPendingImportPreview] =
     useState<ImportPreviewData | null>(null);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [pendingRecoveryKey, setPendingRecoveryKey] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(false);
+
+  const refreshImportWatchFolder = async (dirOverride?: string) => {
+    const dir = (dirOverride ?? importWatchDir).trim();
+    if (!dir || !isTauriEnv() || isLocked) {
+      setPendingImportFiles([]);
+      return;
+    }
+    try {
+      const files = await scanImportFolder(dir);
+      setPendingImportFiles(files);
+      if (files.length > 0) setImportBannerDismissed(false);
+    } catch {
+      // ignore folder read glitches
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoaded || isLocked || !importWatchDir || !isTauriEnv()) return;
+    void refreshImportWatchFolder(importWatchDir);
+    const onFocus = () => void refreshImportWatchFolder(importWatchDir);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isLocked, importWatchDir]);
+
+  const handlePickImportWatchDir = async () => {
+    const picked = await pickFolderDialog('Select Bank Statement Watch Folder');
+    if (!picked) return;
+    rememberDeviceImportWatchDir(picked);
+    setImportWatchDir(picked);
+    await refreshImportWatchFolder(picked);
+  };
+
+  const handleClearImportWatchDir = () => {
+    rememberDeviceImportWatchDir('');
+    setImportWatchDir('');
+    setPendingImportFiles([]);
+  };
   const [preselectedCategoryId, setPreselectedCategoryId] = useState<string | null>(
     null
   );
@@ -1381,10 +1444,14 @@ export function App() {
       let nextBudgets = prev.monthlyBudgets;
 
       if (targetRule && patch.amount !== undefined && patch.amount > 0) {
+        const effectiveFreq = patch.frequency ?? targetRule.frequency;
+        const monthlyEq =
+          Math.round(recurringMonthlyEquivalent(patch.amount, effectiveFreq) * 100) /
+          100;
         const cat = prev.categories.find((c) => c.id === targetRule.categoryId);
         if (cat && cat.defaultBudget === 0) {
           nextCategories = prev.categories.map((c) =>
-            c.id === cat.id ? { ...c, defaultBudget: patch.amount! } : c
+            c.id === cat.id ? { ...c, defaultBudget: monthlyEq } : c
           );
         }
         const mbIdx = prev.monthlyBudgets.findIndex(
@@ -1395,7 +1462,7 @@ export function App() {
           nextBudgets = [...prev.monthlyBudgets];
           nextBudgets[mbIdx] = {
             ...nextBudgets[mbIdx],
-            budget: patch.amount,
+            budget: monthlyEq,
           };
         }
       }
@@ -1439,59 +1506,27 @@ export function App() {
   };
 
   const handleApplyRecurringToMonth = () => {
-    const activeRules = state.recurringRules.filter(
-      (r) =>
-        r.active &&
-        r.amount > 0 &&
-        (state.settings.activeWorkspace === 'combined' ||
-          r.mode === state.settings.activeWorkspace)
+    const { activeCount, newTransactions } = buildRecurringTransactionsForMonth(
+      state.recurringRules,
+      state.transactions,
+      monthKey,
+      state.settings.activeWorkspace
     );
-    if (activeRules.length === 0) {
+    if (activeCount === 0) {
       showNotification(
         'Set a non-zero amount on your active recurring rules (or Monthly Budget) before posting.'
       );
       return;
     }
 
-    let added = 0;
-    const newTxs: TransactionItem[] = [];
-    for (const r of activeRules) {
-      const alreadyExists = state.transactions.some(
-        (tx) =>
-          tx.monthKey === monthKey &&
-          (tx.recurringId === r.id ||
-            (tx.categoryId === r.categoryId &&
-              tx.description === r.description &&
-              Math.abs(tx.amount - r.amount) < 0.01))
-      );
-      if (!alreadyExists) {
-        const dayStr = String(r.dayOfMonth).padStart(2, '0');
-        newTxs.push({
-          id: `tx-rec-${r.id}-${monthKey}`,
-          date: `${monthKey}-${dayStr}`,
-          monthKey,
-          mode: r.mode,
-          type: r.type,
-          categoryId: r.categoryId,
-          description: r.description,
-          amount: r.amount,
-          client: r.client,
-          taxRate: r.taxRate,
-          deductiblePct: r.deductiblePct,
-          paymentMethod: 'Recurring Auto',
-          status: 'cleared',
-          recurringId: r.id,
-        });
-        added++;
-      }
-    }
-
-    if (added > 0) {
+    if (newTransactions.length > 0) {
       setState((prev) => ({
         ...prev,
-        transactions: [...newTxs, ...prev.transactions],
+        transactions: [...newTransactions, ...prev.transactions],
       }));
-      showNotification(`Posted ${added} recurring item(s) to ${monthKey}.`);
+      showNotification(
+        `Posted ${newTransactions.length} recurring item(s) to ${monthKey}.`
+      );
     } else {
       showNotification(
         `All active recurring items are already posted for ${monthKey}.`
@@ -1936,8 +1971,11 @@ export function App() {
   const handlePrepareImport = async (opts: {
     kind: ImportKind;
     targetMode: LedgerMode;
+    accountId?: string;
+    selectedProfileId?: string;
     passphrase?: string;
     keyfilePath?: string;
+    filePath?: string;
     browserFile?: File;
   }): Promise<ImportPreviewData | null> => {
     try {
@@ -1987,7 +2025,50 @@ export function App() {
         return null;
       }
 
-      // Otherwise importing budget_sheet or transactions from .xlsx / .xls / .csv
+      if (opts.kind === 'transactions') {
+        let buffer: ArrayBuffer | null = null;
+        let fileName = 'Bank Statement';
+        let watchedPath: string | undefined = undefined;
+        if (isTauriEnv()) {
+          const picked =
+            opts.filePath ||
+            (await pickOpenFileDialog(
+              'Bank Statement (*.xml, *.ofx, *.qfx, *.csv, *.xlsx, *.xls)',
+              ['xml', 'ofx', 'qfx', 'csv', 'xlsx', 'xls']
+            ));
+          if (!picked) return null;
+          if (opts.filePath) watchedPath = opts.filePath;
+          fileName = picked.split(/[\\/]/).pop() || picked;
+          const b64 = await invoke<string>('read_binary_file', { path: picked });
+          const bytes = base64ToUint8(b64);
+          buffer = bytes.buffer as ArrayBuffer;
+        } else if (opts.browserFile) {
+          fileName = opts.browserFile.name;
+          buffer = await opts.browserFile.arrayBuffer();
+        }
+
+        if (!buffer) return null;
+
+        const parsed = parseBankStatementBuffer(buffer, fileName, {
+          savedProfiles: state.importProfiles ?? [],
+          accountId: opts.accountId,
+          fallbackCurrency: state.settings.currency,
+          selectedProfileId: opts.selectedProfileId,
+        });
+        return {
+          kind: 'transactions',
+          targetMode: opts.targetMode,
+          fileName,
+          sheetName: parsed.sheetName,
+          proposedState: state,
+          importedCount: parsed.rawTransactions.length,
+          accountId: opts.accountId,
+          watchedFilePath: watchedPath,
+          bankParseResult: parsed,
+        };
+      }
+
+      // budget_sheet from .xlsx / .xls / .csv
       let buffer: ArrayBuffer | null = null;
       let fileName = 'Imported File';
       if (isTauriEnv()) {
@@ -2007,45 +2088,24 @@ export function App() {
 
       if (!buffer) return null;
 
-      if (opts.kind === 'budget_sheet') {
-        const res = importBudgetSheetFromBuffer(
-          buffer,
-          state,
-          opts.targetMode,
-          monthKey
-        );
-        return {
-          kind: 'budget_sheet',
-          targetMode: opts.targetMode,
-          fileName,
-          sheetName: res.sheetName,
-          proposedState: {
-            ...res.state,
-            settings: { ...res.state.settings, setupCompleted: true },
-          },
-          importedCount: res.importedCategories,
-          budgetRows: res.previewRows,
-        };
-      } else {
-        const res = importTransactionsFromBuffer(
-          buffer,
-          state,
-          opts.targetMode,
-          monthKey
-        );
-        return {
-          kind: 'transactions',
-          targetMode: opts.targetMode,
-          fileName,
-          sheetName: res.sheetName,
-          proposedState: {
-            ...res.state,
-            settings: { ...res.state.settings, setupCompleted: true },
-          },
-          importedCount: res.importedTransactions,
-          transactionRows: res.previewRows,
-        };
-      }
+      const res = importBudgetSheetFromBuffer(
+        buffer,
+        state,
+        opts.targetMode,
+        monthKey
+      );
+      return {
+        kind: 'budget_sheet',
+        targetMode: opts.targetMode,
+        fileName,
+        sheetName: res.sheetName,
+        proposedState: {
+          ...res.state,
+          settings: { ...res.state.settings, setupCompleted: true },
+        },
+        importedCount: res.importedCategories,
+        budgetRows: res.previewRows,
+      };
     } catch (err) {
       showNotification(`Import error: ${String(err)}`);
       return null;
@@ -2082,6 +2142,60 @@ export function App() {
         `Imported ${preview.importedCount} transaction(s) from "${preview.fileName}" into ${preview.targetMode} ledger.`
       );
     }
+  };
+
+  const handleCommitBankImport = async ({
+    preview,
+    stagedRows,
+    savedProfile,
+    savedRules,
+    archiveWatchedFile,
+  }: {
+    preview: ImportPreviewData;
+    stagedRows: StagedBankTransaction[];
+    savedProfile?: BankImportProfile;
+    savedRules: ImportRule[];
+    archiveWatchedFile: boolean;
+  }) => {
+    const next = applyStagedTransactionsToLedger({
+      stagedRows,
+      currentState: latestStateRef.current,
+      savedProfile,
+      savedRules,
+    });
+    setState(keepDeviceSettings(next, latestStateRef.current));
+    setShowImportModal(false);
+    setPendingImportPreview(null);
+    setInitialPendingFilePath(null);
+    if (!vaultStatus?.unlocked) {
+      setShowSetupModal(true);
+    } else {
+      setSaveBlocked(false);
+      setShowSetupModal(false);
+    }
+    setActiveTab('transactions');
+
+    if (archiveWatchedFile && preview.watchedFilePath && isTauriEnv()) {
+      await archiveImportedFile(preview.watchedFilePath).catch(() => undefined);
+      await refreshImportWatchFolder();
+    }
+
+    const importedCount = stagedRows.filter((r) => r.included).length;
+    showNotification(
+      `Imported ${importedCount} bank transaction(s) from "${preview.fileName}" into ${preview.targetMode} ledger.`
+    );
+  };
+
+  const handleSaveRulesAndProfiles = (
+    nextRules: ImportRule[],
+    nextProfiles: BankImportProfile[]
+  ) => {
+    setState((prev) => ({
+      ...prev,
+      importRules: nextRules,
+      importProfiles: nextProfiles,
+    }));
+    showNotification('Saved import rules & bank profiles.');
   };
 
   /** New device: download the cloud vault into the local DB path and open it (§6). */
@@ -2226,6 +2340,43 @@ export function App() {
         </div>
       )}
 
+      {!importBannerDismissed && pendingImportFiles.length > 0 && (
+        <div className="px-4 py-2 bg-indigo/10 border-b border-indigo/25 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-ink">
+            <FolderSearch className="w-3.5 h-3.5 text-indigo shrink-0" />
+            <span className="font-medium">
+              {t('bankImport.bannerReady').replace(
+                '{count}',
+                String(pendingImportFiles.length)
+              )}
+            </span>
+            <span className="text-ink-3 truncate max-w-[260px]">
+              {pendingImportFiles[0].name}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setInitialPendingFilePath(pendingImportFiles[0].path);
+                setShowImportModal(true);
+              }}
+              className="h-7 px-3 inline-flex items-center gap-1.5 rounded-md bg-indigo text-white text-[11px] font-medium hover:opacity-90 cursor-pointer"
+            >
+              <span>{t('bankImport.reviewNowBtn')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportBannerDismissed(true)}
+              className="p-1 rounded text-ink-3 hover:text-ink hover:bg-raised cursor-pointer"
+              title={t('common.close')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <Sidebar
@@ -2241,7 +2392,6 @@ export function App() {
           onRevealBackupDir={() =>
             revealPathInExplorer(state.settings.backupDir)
           }
-          onOpenSetupWizard={() => setShowSetupModal(true)}
         />
 
         <main className="flex-1 overflow-y-auto bg-app">
@@ -2307,6 +2457,7 @@ export function App() {
               onAddTransaction={handleAddTransaction}
               onDeleteTransaction={handleDeleteTransaction}
               onOpenImportModal={() => setShowImportModal(true)}
+              onOpenImportRulesModal={() => setShowImportRulesModal(true)}
               onExportCsv={handleExportTransactionsCsv}
             />
           )}
@@ -2472,6 +2623,7 @@ export function App() {
       {/* Dedicated Import Data Modal */}
       <ImportDataModal
         isOpen={showImportModal}
+        ledgerState={state}
         defaultMode={
           state.settings.activeWorkspace === 'freelancer'
             ? 'freelancer'
@@ -2487,13 +2639,32 @@ export function App() {
         }
         initialPreviewData={pendingImportPreview}
         onClearInitialPreview={() => setPendingImportPreview(null)}
+        importWatchDir={importWatchDir}
+        pendingImportFiles={pendingImportFiles}
+        initialPendingFilePath={initialPendingFilePath}
+        onClearInitialPendingFilePath={() => setInitialPendingFilePath(null)}
+        onPickImportWatchDir={handlePickImportWatchDir}
+        onClearImportWatchDir={handleClearImportWatchDir}
+        onOpenRulesModal={() => setShowImportRulesModal(true)}
         onClose={() => {
           setPendingImportPreview(null);
+          setInitialPendingFilePath(null);
           setShowImportModal(false);
         }}
         onPrepareImport={handlePrepareImport}
         onCommitImport={handleCommitImport}
+        onCommitBankImport={handleCommitBankImport}
         isTauri={isTauriEnv()}
+      />
+
+      <ImportRulesModal
+        isOpen={showImportRulesModal}
+        rules={state.importRules ?? []}
+        profiles={state.importProfiles ?? []}
+        categories={state.categories}
+        accounts={state.accounts ?? []}
+        onSaveRulesAndProfiles={handleSaveRulesAndProfiles}
+        onClose={() => setShowImportRulesModal(false)}
       />
 
       {/* Minimalist Bottom-Right Toast Notification */}
