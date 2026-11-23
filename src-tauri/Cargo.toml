@@ -28,7 +28,7 @@ ureq = { version = "2.10", features = ["tls"] }
 zeroize = "1.9"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-future = "0.3"
+windows-future = "0.100"
 windows = { version = "0.62", features = [
     "Foundation",
     "Security_Credentials",
