@@ -43,6 +43,11 @@ jobs:
       - name: Type-check and build frontend
         run: npm run build
 
+      # Calculation tests, including the cross-platform golden ledger that koban-mac checks too
+      # (fixtures/golden — both repos must keep identical copies).
+      - name: Frontend tests
+        run: npm test
+
       # Correctness and suspicious-code lints fail the build; style lints are reported only
       # (the existing code has ~20 style findings; tighten to `-D warnings` once they are cleaned up).
       - name: Clippy

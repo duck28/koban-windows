@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { isTauriEnv } from './storage';
+import { version as packageVersion } from '../../package.json';
 
 export interface UpdateCheckResult {
   current_version: string;
@@ -12,7 +13,8 @@ export interface UpdateCheckResult {
   published_at?: string | null;
 }
 
-export const APP_VERSION = '0.5.0';
+// The release workflow sets package.json's version from the git tag, so this always matches the build.
+export const APP_VERSION: string = packageVersion;
 export const GITHUB_RELEASES_URL =
   'https://github.com/duck28/koban-windows/releases';
 const GITHUB_RELEASES_API =

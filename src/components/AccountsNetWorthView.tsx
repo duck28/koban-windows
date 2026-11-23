@@ -888,7 +888,8 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                                 : 'text-accent'
                           }`}
                         >
-                          {isLiability && liveBalance > 0 ? '-' : ''}
+                          {/* Debt on a liability, or an overdrawn asset account, shows a minus */}
+                          {(isLiability ? liveBalance > 0 : liveBalance < 0) ? '-' : ''}
                           {formatCurrency(Math.abs(liveBalance), currency)}
                         </button>
                       )}

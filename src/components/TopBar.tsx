@@ -19,6 +19,7 @@ import {
   Sparkles,
   SlidersHorizontal,
   Lock,
+  Keyboard,
 } from 'lucide-react';
 import { ActiveWorkspace, AppSettings } from '../types';
 import { Logo } from './Logo';
@@ -58,6 +59,8 @@ interface TopBarProps {
   onOpenSetupWizard: () => void;
   onOpenSettings: () => void;
   onLockVault: () => void;
+  /** Opens the keyboard shortcut overview (also: ? or F1). */
+  onShowShortcuts?: () => void;
   onOpenImportModal: () => void;
   onExportExcel: () => void;
   onExportBudgetCsv: () => void;
@@ -78,6 +81,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenSetupWizard,
   onOpenSettings,
   onLockVault,
+  onShowShortcuts,
   onOpenImportModal,
   onExportExcel,
   onExportBudgetCsv,
@@ -322,6 +326,16 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <Lock className="w-4 h-4" />
         </button>
+
+        {onShowShortcuts && (
+          <button
+            onClick={onShowShortcuts}
+            className={iconBtn}
+            title={t('shortcuts.buttonTip')}
+          >
+            <Keyboard className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Dedicated Import Data Button */}
         <button

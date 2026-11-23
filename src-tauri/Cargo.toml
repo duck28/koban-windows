@@ -1,6 +1,6 @@
 [package]
 name = "koban"
-version = "0.5.0"
+version = "0.5.1"
 description = "Koban for Windows: Minimalist Home & Freelancer Budgeting"
 authors = ["Roland Matuz"]
 license = "Apache-2.0"

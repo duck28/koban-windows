@@ -402,6 +402,18 @@ export interface NetWorthSummaryMetrics {
   historySeries: NetWorthHistoryPoint[];
 }
 
+/**
+ * Category id of transactions created by "Transfer between accounts". It matches no budget
+ * category, so a transfer pair never counts as income or spending in the worksheet or reports —
+ * it only moves money between the two accounts.
+ */
+export const TRANSFER_CATEGORY_ID = '__transfer__';
+
+/** True for one leg of an account-to-account transfer pair. */
+export function isAccountTransfer(tx: Pick<TransactionItem, 'categoryId'>): boolean {
+  return tx.categoryId === TRANSFER_CATEGORY_ID;
+}
+
 /** categoryId → target account id, for savings categories that have one. */
 export function savingsTargetMap(categories: CategoryItem[]): Map<string, string> {
   const map = new Map<string, string>();
@@ -420,7 +432,8 @@ export function computeAccountLiveBalance(
   let txExpenseSum = 0;
   let txCount = 0;
   let txTransferInSum = 0;
-  // Manually valued accounts: only savings moved in after the last valuation are added
+  // Manually valued accounts: only transfers (savings moved in, or account-to-account transfer
+  // pairs) dated after the last valuation are added, as money in (+) or out (-) of the asset.
   let pendingTransferIn = 0;
 
   for (const tx of transactions) {
@@ -430,6 +443,9 @@ export function computeAccountLiveBalance(
         txIncomeSum += tx.amount;
       } else {
         txExpenseSum += tx.amount;
+      }
+      if (isAccountTransfer(tx) && tx.date > (account.updatedAt ?? '')) {
+        pendingTransferIn += tx.type === 'income' ? tx.amount : -tx.amount;
       }
     } else if (
       tx.type === 'expense' &&
@@ -464,10 +480,69 @@ export function computeAccountLiveBalance(
   };
 }
 
+interface ClassTotals {
+  liquid: number;
+  retirement: number;
+  investment: number;
+  fixed: number;
+  liabilities: number;
+}
+
+/** Net-worth buckets of a set of account balances (assets floored at 0, like the KPI cards). */
+function totalsByClass(items: AccountComputedItem[]): ClassTotals {
+  const t: ClassTotals = { liquid: 0, retirement: 0, investment: 0, fixed: 0, liabilities: 0 };
+  for (const item of items) {
+    if (!item.account.includeInNetWorth) continue;
+    const val = Math.max(0, item.liveBalance);
+    switch (item.account.classification) {
+      case 'liquid':
+        t.liquid += val;
+        break;
+      case 'retirement':
+        t.retirement += val;
+        break;
+      case 'investment':
+        t.investment += val;
+        break;
+      case 'fixed_asset':
+        t.fixed += val;
+        break;
+      case 'liability':
+        t.liabilities += Math.abs(item.liveBalance);
+        break;
+    }
+  }
+  return t;
+}
+
+function historyPoint(
+  month: number,
+  label: string,
+  monthKey: string,
+  t: ClassTotals
+): NetWorthHistoryPoint {
+  const totalAssets = t.liquid + t.retirement + t.investment + t.fixed;
+  return {
+    month,
+    monthLabel: label,
+    monthKey,
+    liquidAssets: t.liquid,
+    retirementAssets: t.retirement,
+    investmentAssets: t.investment,
+    fixedAssets: t.fixed,
+    totalAssets,
+    totalLiabilities: t.liabilities,
+    netWorth: totalAssets - t.liabilities,
+    hasExplicitSnapshot: false,
+  };
+}
+
 export function computeNetWorthMetrics(
   state: LedgerState,
   workspace: ActiveWorkspace,
-  monthlyOutflowReference = 0
+  monthlyOutflowReference = 0,
+  /** "Today" — decides which months are history and which are forecast (tests pass a fixed date). */
+  now: Date = new Date()
 ): NetWorthSummaryMetrics {
   const filterMode = (m: LedgerMode) =>
     workspace === 'combined' ? true : m === workspace;
@@ -524,19 +599,32 @@ export function computeNetWorthMetrics(
   const liquidRunwayMonths =
     monthlyOutflowReference > 0 ? liquidAssets / monthlyOutflowReference : 0;
 
-  // Build 12-month Net Worth trajectory for activeYear
+  // 12-month Net Worth trajectory for activeYear:
+  // - an explicit snapshot wins;
+  // - past & current months are rebuilt from the transactions dated up to that month's end;
+  // - future months start from today's balances and add each month's planned (budget) net,
+  //   with savings that have a target account moved into that account's class.
   const snapshotsByMonth = new Map(
     (state.netWorthSnapshots ?? []).map((s) => [s.monthKey, s])
   );
-  const annualCashflow = computeAnnualSeries(
-    state,
-    state.settings.activeYear,
-    workspace
-  );
+  const todayMonth = currentMonthKey(now);
+  const allTxs = state.transactions ?? [];
+  const live: ClassTotals = {
+    liquid: liquidAssets,
+    retirement: retirementAssets,
+    investment: investmentAssets,
+    fixed: fixedAssets,
+    liabilities: totalLiabilities,
+  };
+  const forecast: ClassTotals = { ...live };
+  const classKey: Record<string, keyof ClassTotals> = {
+    liquid: 'liquid',
+    retirement: 'retirement',
+    investment: 'investment',
+    fixed_asset: 'fixed',
+    liability: 'liabilities',
+  };
 
-  let cumulativeCashflow = 0;
-  // Savings with a target account move money into that account's class instead of vanishing
-  const cumulativeTransfers = { liquid: 0, retirement: 0, investment: 0, fixed_asset: 0, liability: 0 };
   const historySeries: NetWorthHistoryPoint[] = SHORT_MONTHS.map((label, idx) => {
     const month = idx + 1;
     const mk = formatMonthKey(state.settings.activeYear, month);
@@ -558,47 +646,35 @@ export function computeNetWorthMetrics(
       };
     }
 
-    const cf = annualCashflow[idx];
-    cumulativeCashflow += cf ? cf.netActual : 0;
-    if (savingsTargets.size > 0) {
-      for (const gs of computeMonthSummary(state, mk, workspace).groups) {
-        if (gs.group.kind !== 'savings') continue;
-        for (const row of gs.rows) {
-          const target = accountById.get(savingsTargets.get(row.category.id) ?? '');
-          if (target && target.includeInNetWorth && row.actual !== 0) {
-            cumulativeTransfers[target.classification] += row.actual;
-          }
+    if (mk <= todayMonth) {
+      const monthEnd = `${mk}-31`;
+      const upTo = allTxs.filter((t) => t.date <= monthEnd);
+      const items = rawAccounts.map((acc) =>
+        computeAccountLiveBalance(acc, upTo, savingsTargets)
+      );
+      return historyPoint(month, label, mk, totalsByClass(items));
+    }
+
+    // Forecast: planned net of this month on top of the running forecast
+    const summary = computeMonthSummary(state, mk, workspace);
+    for (const gs of summary.groups) {
+      if (gs.group.kind !== 'savings') continue;
+      for (const row of gs.rows) {
+        const target = accountById.get(savingsTargets.get(row.category.id) ?? '');
+        if (target && target.includeInNetWorth && row.budget !== 0) {
+          const key = classKey[target.classification];
+          forecast[key] += key === 'liabilities' ? -row.budget : row.budget;
         }
       }
     }
-    const projectedLiquid = Math.max(
-      0,
-      liquidAssets + cumulativeCashflow + cumulativeTransfers.liquid
-    );
-    const projectedRetirement = retirementAssets + cumulativeTransfers.retirement;
-    const projectedInvestment = investmentAssets + cumulativeTransfers.investment;
-    const projectedFixed = fixedAssets + cumulativeTransfers.fixed_asset;
-    const projectedLiabilities = Math.max(
-      0,
-      totalLiabilities - cumulativeTransfers.liability
-    );
-    const projectedTotalAssets =
-      projectedLiquid + projectedRetirement + projectedInvestment + projectedFixed;
-    const projectedNetWorth = projectedTotalAssets - projectedLiabilities;
-
-    return {
-      month,
-      monthLabel: label,
-      monthKey: mk,
-      liquidAssets: projectedLiquid,
-      retirementAssets: projectedRetirement,
-      investmentAssets: projectedInvestment,
-      fixedAssets: projectedFixed,
-      totalAssets: projectedTotalAssets,
-      totalLiabilities: projectedLiabilities,
-      netWorth: projectedNetWorth,
-      hasExplicitSnapshot: false,
+    // netBudget already subtracts the savings; the part moved into tracked accounts is not lost
+    forecast.liquid += summary.netBudget;
+    const clamped: ClassTotals = {
+      ...forecast,
+      liquid: Math.max(0, forecast.liquid),
+      liabilities: Math.max(0, forecast.liabilities),
     };
+    return historyPoint(month, label, mk, clamped);
   });
 
   return {

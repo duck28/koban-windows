@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -20,7 +20,7 @@ import {
   LedgerMode,
   TransactionItem,
 } from '../types';
-import { formatCurrency } from '../utils/calculations';
+import { formatCurrency, isAccountTransfer } from '../utils/calculations';
 import { useI18n } from '../i18n';
 
 interface TransactionsViewProps {
@@ -41,9 +41,12 @@ interface TransactionsViewProps {
   onOpenImportModal: () => void;
   onOpenImportRulesModal?: () => void;
   onExportCsv: () => void;
+  /** Keyboard shortcut request: focus the new-entry form (Ctrl+N) or the search box (Ctrl+F). */
+  focusRequest?: { target: 'new' | 'search'; nonce: number } | null;
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
+  focusRequest,
   transactions,
   groups,
   categories,
@@ -87,6 +90,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [deductiblePct, setDeductiblePct] = useState('100');
 
   const [searchQuery, setSearchQuery] = useState('');
+  const descInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const el = focusRequest.target === 'search' ? searchInputRef.current : descInputRef.current;
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.focus();
+    el.select();
+  }, [focusRequest]);
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [accountFilter, setAccountFilter] = useState<string>(
     preselectedAccountId || 'all'
@@ -204,11 +218,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     })
     .sort((a, b) => b.date.localeCompare(a.date));
 
+  // Account-to-account transfers move money but are neither income nor spending
   const totalShownIncome = filteredTxs
-    .filter((tx) => tx.type === 'income')
+    .filter((tx) => tx.type === 'income' && !isAccountTransfer(tx))
     .reduce((acc, tx) => acc + tx.amount, 0);
   const totalShownExpense = filteredTxs
-    .filter((tx) => tx.type === 'expense')
+    .filter((tx) => tx.type === 'expense' && !isAccountTransfer(tx))
     .reduce((acc, tx) => acc + tx.amount, 0);
 
   return (
@@ -361,6 +376,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               {t('tx.descPayeeLabel')}
             </label>
             <input
+              ref={descInputRef}
               type="text"
               placeholder={t('tx.descPlaceholder')}
               value={description}
@@ -460,6 +476,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           <div className="relative flex-1 max-w-sm">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
             <input
+              ref={searchInputRef}
               type="text"
               placeholder={t('tx.searchPlaceholder')}
               value={searchQuery}
@@ -590,7 +607,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                           />
                           <div>
                             <div className="text-ink font-medium">
-                              {cat ? tCategoryName(cat) : t('tx.uncategorized')}
+                              {cat
+                                ? tCategoryName(cat)
+                                : isAccountTransfer(tx)
+                                  ? t('tx.transferLabel')
+                                  : t('tx.uncategorized')}
                             </div>
                             <div className="text-[10px] text-ink-3 uppercase tracking-wider">
                               {grp ? tGroupName(grp) : t(`workspace.${tx.mode}`)}

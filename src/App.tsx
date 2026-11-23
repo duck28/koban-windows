@@ -32,7 +32,9 @@ import {
 } from './data/templates';
 import {
   buildRecurringTransactionsForMonth,
+  isAccountTransfer,
   isScheduledRule,
+  TRANSFER_CATEGORY_ID,
   computeAnnualSeries,
   computeMonthSummary,
   computeNetWorthMetrics,
@@ -92,6 +94,8 @@ import { ImportRulesModal } from './components/ImportRulesModal';
 import { MonthlyWorksheetView } from './components/MonthlyWorksheetView';
 import { YearlyBudgetPlannerView } from './components/YearlyBudgetPlannerView';
 import { TransactionsView } from './components/TransactionsView';
+import { ConfirmDialog, ConfirmOptions } from './components/ConfirmDialog';
+import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { AccountsNetWorthView } from './components/AccountsNetWorthView';
 import { ReportsChartsView } from './components/ReportsChartsView';
 import { CategoriesStudioView } from './components/CategoriesStudioView';
@@ -192,7 +196,7 @@ export function App() {
     createInitialLedgerState('both', 'CHF', '', false)
   );
   const [isLoaded, setIsLoaded] = useState(false);
-  const { t, tf, setLanguage, tGroupName, tCategoryName } = useI18n();
+  const { t, tf, setLanguage, tGroupName, tCategoryName, tAccountName, tGoalName } = useI18n();
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
@@ -200,6 +204,16 @@ export function App() {
   const didStartupUpdateCheckRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Themed confirm dialog (replaces window.confirm) and the keyboard-shortcut overview
+  const [confirmRequest, setConfirmRequest] = useState<
+    (ConfirmOptions & { resolve: (ok: boolean) => void }) | null
+  >(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  /** Ask the Transactions view to focus its new-entry form or its search box. */
+  const [txFocusRequest, setTxFocusRequest] = useState<{
+    target: 'new' | 'search';
+    nonce: number;
+  } | null>(null);
   const [activeTab, setActiveTab] = useState<ViewTab>('worksheet');
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -700,14 +714,62 @@ export function App() {
   // Global keyboard shortcuts (oriented on ZenPDF)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // No app shortcuts on the lock screen (e.g. Ctrl+S could set a new backup folder).
-      if (isLocked) return;
+      // No app shortcuts on the lock screen (e.g. Ctrl+S could set a new backup folder),
+      // and none while a dialog handles its own keys.
+      if (isLocked || confirmRequest || showShortcuts) return;
       const target = e.target as HTMLElement | null;
       const inInput =
         target &&
         (target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT');
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Month navigation: Alt+← / Alt+→ anywhere, T for the current month
+      if (e.altKey && !mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        shiftActiveMonth(e.key === 'ArrowLeft' ? -1 : 1);
+        return;
+      }
+      // Ctrl+[ / Ctrl+] — same as ⌘[ / ⌘] on the Mac
+      if (mod && !e.altKey && (e.key === '[' || e.key === ']')) {
+        e.preventDefault();
+        shiftActiveMonth(e.key === '[' ? -1 : 1);
+        return;
+      }
+      if (!inInput && !mod && !e.altKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        const now = new Date();
+        updateSettings({ activeYear: now.getFullYear(), activeMonth: now.getMonth() + 1 });
+        return;
+      }
+
+      // Shortcut overview: ? or F1
+      if ((!inInput && e.key === '?') || e.key === 'F1') {
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
+
+      if (mod && e.key === ',') {
+        e.preventDefault();
+        setActiveTab('settings');
+        return;
+      }
+
+      if (mod && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setActiveTab('transactions');
+        setTxFocusRequest({ target: 'search', nonce: Date.now() });
+        return;
+      }
+
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        handleApplyRecurringToMonth();
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
@@ -724,6 +786,7 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         setActiveTab('transactions');
+        setTxFocusRequest({ target: 'new', nonce: Date.now() });
         return;
       }
 
@@ -759,7 +822,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [state, isLocked]);
+  }, [state, isLocked, confirmRequest, showShortcuts]);
 
   const monthKey = formatMonthKey(
     state.settings.activeYear,
@@ -804,6 +867,23 @@ export function App() {
   );
 
   // ================= STATE UPDATERS =================
+
+  /** Opens the themed confirm dialog; resolves true when confirmed. */
+  const askConfirm = (opts: ConfirmOptions) =>
+    new Promise<boolean>((resolve) => {
+      setConfirmRequest({ ...opts, resolve });
+    });
+
+  /** Asks before deleting, unless "Confirm before deleting" is turned off in Settings. */
+  const confirmDelete = async (title: string, message?: string) => {
+    if (state.settings.confirmBeforeDelete === false) return true;
+    return askConfirm({ title, message, offerDontAsk: true });
+  };
+
+  const shiftActiveMonth = (delta: number) => {
+    const idx = state.settings.activeYear * 12 + (state.settings.activeMonth - 1) + delta;
+    updateSettings({ activeYear: Math.floor(idx / 12), activeMonth: (idx % 12) + 1 });
+  };
 
   const updateSettings = (patch: Partial<AppSettings>) => {
     setState((prev) => ({
@@ -1264,14 +1344,14 @@ export function App() {
     }));
   };
 
-  const handleDeleteGroup = (groupId: string) => {
+  const handleDeleteGroup = async (groupId: string) => {
     const grp = state.groups.find((g) => g.id === groupId);
     if (
-      state.settings.confirmBeforeDelete !== false &&
       grp &&
-      !window.confirm(
-        `${tf('worksheet.deleteGrpAlertTitle', { name: tGroupName(grp) })}\n\n${t('worksheet.deleteGrpAlertMsg')}`
-      )
+      !(await confirmDelete(
+        tf('worksheet.deleteGrpAlertTitle', { name: tGroupName(grp) }),
+        t('worksheet.deleteGrpAlertMsg')
+      ))
     ) {
       return;
     }
@@ -1345,14 +1425,14 @@ export function App() {
     }));
   };
 
-  const handleDeleteCategory = (categoryId: string) => {
+  const handleDeleteCategory = async (categoryId: string) => {
     const cat = state.categories.find((c) => c.id === categoryId);
     if (
-      state.settings.confirmBeforeDelete !== false &&
       cat &&
-      !window.confirm(
-        `${tf('worksheet.deleteCatAlertTitle', { name: tCategoryName(cat) })}\n\n${t('worksheet.deleteCatAlertMsg')}`
-      )
+      !(await confirmDelete(
+        tf('worksheet.deleteCatAlertTitle', { name: tCategoryName(cat) }),
+        t('worksheet.deleteCatAlertMsg')
+      ))
     ) {
       return;
     }
@@ -1390,11 +1470,31 @@ export function App() {
     );
   };
 
-  const handleDeleteTransaction = (id: string) => {
-    setState((prev) => ({
-      ...prev,
-      transactions: prev.transactions.filter((t) => t.id !== id),
-    }));
+  const handleDeleteTransaction = async (id: string) => {
+    const tx = state.transactions.find((t) => t.id === id);
+    if (
+      tx &&
+      !(await confirmDelete(
+        tf('tx.deleteTitle', { name: tx.description }),
+        isAccountTransfer(tx)
+          ? t('tx.deleteTransferMsg')
+          : tf('tx.deleteMsg', {
+              date: tx.date,
+              amount: `${state.settings.currency} ${tx.amount.toFixed(2)}`,
+            })
+      ))
+    ) {
+      return;
+    }
+    setState((prev) => {
+      // Deleting either leg of an account-to-account transfer removes the whole transfer
+      const tx = prev.transactions.find((t) => t.id === id);
+      const peerId = tx && isAccountTransfer(tx) ? tx.transferPeerId : undefined;
+      return {
+        ...prev,
+        transactions: prev.transactions.filter((t) => t.id !== id && t.id !== peerId),
+      };
+    });
   };
 
   // ================= RECURRING & GOALS =================
@@ -1546,7 +1646,17 @@ export function App() {
     }));
   };
 
-  const handleDeleteRecurringRule = (id: string) => {
+  const handleDeleteRecurringRule = async (id: string) => {
+    const rule = state.recurringRules.find((r) => r.id === id);
+    if (
+      rule &&
+      !(await confirmDelete(
+        tf('recurring.deleteTitle', { name: rule.description }),
+        t('recurring.deleteMsg')
+      ))
+    ) {
+      return;
+    }
     setState((prev) => {
       const removed = prev.recurringRules.find((r) => r.id === id);
       const remaining = prev.recurringRules.filter((r) => r.id !== id);
@@ -1614,7 +1724,14 @@ export function App() {
     }));
   };
 
-  const handleDeleteGoal = (id: string) => {
+  const handleDeleteGoal = async (id: string) => {
+    const goal = state.savingsGoals.find((g) => g.id === id);
+    if (
+      goal &&
+      !(await confirmDelete(tf('goals.deleteTitle', { name: tGoalName(goal) })))
+    ) {
+      return;
+    }
     setState((prev) => ({
       ...prev,
       savingsGoals: prev.savingsGoals.filter((g) => g.id !== id),
@@ -1651,14 +1768,14 @@ export function App() {
     }));
   };
 
-  const handleDeleteAccount = (accountId: string) => {
+  const handleDeleteAccount = async (accountId: string) => {
     const acc = (state.accounts ?? []).find((a) => a.id === accountId);
     if (
-      state.settings.confirmBeforeDelete !== false &&
       acc &&
-      !window.confirm(
-        `Are you sure you want to remove account "${acc.name}"? Linked transactions will be kept as unassigned.`
-      )
+      !(await confirmDelete(
+        tf('accounts.deleteTitle', { name: tAccountName(acc) }),
+        t('accounts.deleteMsg')
+      ))
     ) {
       return;
     }
@@ -1672,47 +1789,57 @@ export function App() {
     showNotification('Removed account.');
   };
 
+  /**
+   * Records a transfer as a linked pair of transactions (out of one account, into the other)
+   * instead of editing balances, so it keeps a history and can be undone by deleting it.
+   * The pair uses TRANSFER_CATEGORY_ID, so it never counts as income or spending.
+   */
   const handleTransferBetweenAccounts = (
     fromAccountId: string,
     toAccountId: string,
     amount: number,
-    _date: string,
+    date: string,
     note: string
   ) => {
-    const today = new Date().toISOString().slice(0, 10);
-    setState((prev) => {
-      const nextAccounts = (prev.accounts ?? []).map((acc) => {
-        if (acc.id === fromAccountId) {
-          const delta = acc.classification === 'liability' ? amount : -amount;
-          return {
-            ...acc,
-            startingBalance: acc.startingBalance + delta,
-            currentBalance: acc.currentBalance + delta,
-            updatedAt: today,
-          };
-        }
-        if (acc.id === toAccountId) {
-          const delta = acc.classification === 'liability' ? -amount : amount;
-          return {
-            ...acc,
-            startingBalance: acc.startingBalance + delta,
-            currentBalance: acc.currentBalance + delta,
-            updatedAt: today,
-          };
-        }
-        return acc;
-      });
-      return {
-        ...prev,
-        accounts: nextAccounts,
-      };
-    });
-    const fromName =
-      state.accounts.find((a) => a.id === fromAccountId)?.name ?? 'Source';
-    const toName =
-      state.accounts.find((a) => a.id === toAccountId)?.name ?? 'Destination';
+    const from = (state.accounts ?? []).find((a) => a.id === fromAccountId);
+    const to = (state.accounts ?? []).find((a) => a.id === toAccountId);
+    if (!from || !to || fromAccountId === toAccountId || !(amount > 0)) return;
+    const txDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : new Date().toISOString().slice(0, 10);
+    const pairId = `tx-xfer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const description = note.trim() || `${from.name} → ${to.name}`;
+    const base = {
+      date: txDate,
+      monthKey: txDate.slice(0, 7),
+      categoryId: TRANSFER_CATEGORY_ID,
+      description,
+      amount,
+      paymentMethod: 'Transfer',
+      status: 'cleared' as const,
+    };
+    const outTx: TransactionItem = {
+      ...base,
+      id: `${pairId}-out`,
+      mode: from.mode,
+      type: 'expense',
+      accountId: from.id,
+      transferPeerId: `${pairId}-in`,
+    };
+    const inTx: TransactionItem = {
+      ...base,
+      id: `${pairId}-in`,
+      mode: to.mode,
+      type: 'income',
+      accountId: to.id,
+      transferPeerId: `${pairId}-out`,
+    };
+    setState((prev) => ({
+      ...prev,
+      transactions: [outTx, inTx, ...prev.transactions],
+    }));
     showNotification(
-      `Transferred ${state.settings.currency} ${amount.toFixed(2)} from ${fromName} → ${toName} (${note}).`
+      `Transferred ${state.settings.currency} ${amount.toFixed(2)} from ${from.name} → ${to.name} (${description}).`
     );
   };
 
@@ -2357,6 +2484,7 @@ export function App() {
         onOpenImportModal={() => setShowImportModal(true)}
         onOpenSettings={() => setActiveTab('settings')}
         onLockVault={() => void lockVaultNow()}
+        onShowShortcuts={() => setShowShortcuts(true)}
         onExportExcel={handleExportExcel}
         onExportBudgetCsv={handleExportBudgetCsv}
         onExportTransactionsCsv={handleExportTransactionsCsv}
@@ -2509,6 +2637,7 @@ export function App() {
 
           {activeTab === 'transactions' && (
             <TransactionsView
+              focusRequest={txFocusRequest}
               transactions={state.transactions}
               groups={state.groups}
               categories={state.categories}
@@ -2734,6 +2863,20 @@ export function App() {
         onSaveRulesAndProfiles={handleSaveRulesAndProfiles}
         onClose={() => setShowImportRulesModal(false)}
       />
+
+      {confirmRequest && (
+        <ConfirmDialog
+          {...confirmRequest}
+          onResolve={(ok, dontAskAgain) => {
+            const { resolve } = confirmRequest;
+            setConfirmRequest(null);
+            if (ok && dontAskAgain) updateSettings({ confirmBeforeDelete: false });
+            resolve(ok);
+          }}
+        />
+      )}
+
+      {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
 
       {/* Minimalist Bottom-Right Toast Notification */}
       {toast && (
