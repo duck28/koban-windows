@@ -22,6 +22,7 @@ import {
   ViewTab,
   WebDavConfig,
   YearlyPlanItem,
+  YearlyPlanSchedule,
 } from './types';
 import {
   createDefaultOnboardingAccounts,
@@ -31,6 +32,7 @@ import {
 } from './data/templates';
 import {
   buildRecurringTransactionsForMonth,
+  isScheduledRule,
   computeAnnualSeries,
   computeMonthSummary,
   computeNetWorthMetrics,
@@ -991,6 +993,34 @@ export function App() {
 
   const handleUpdateBudget = (categoryId: string, newBudget: number) => {
     setState((prev) => {
+      // Budgets driven by a scheduled recurring rule (bi-weekly, bi-monthly…)
+      // vary per month: a typed value only overrides this month.
+      const hasScheduledRule = prev.recurringRules.some(
+        (r) => r.active && r.categoryId === categoryId && isScheduledRule(r)
+      );
+      if (hasScheduledRule) {
+        const sIdx = prev.monthlyBudgets.findIndex(
+          (mb) => mb.monthKey === monthKey && mb.categoryId === categoryId
+        );
+        const scheduledBudgets = [...prev.monthlyBudgets];
+        if (sIdx >= 0) {
+          scheduledBudgets[sIdx] = {
+            ...scheduledBudgets[sIdx],
+            budget: newBudget,
+            budgetManual: true,
+          };
+        } else {
+          scheduledBudgets.push({
+            monthKey,
+            categoryId,
+            budget: newBudget,
+            directActual: null,
+            budgetManual: true,
+          });
+        }
+        return { ...prev, monthlyBudgets: scheduledBudgets };
+      }
+
       const prevCat = prev.categories.find((c) => c.id === categoryId);
       const oldDefaultBudget = prevCat?.defaultBudget ?? 0;
 
@@ -1024,6 +1054,17 @@ export function App() {
         recurringRules: nextRecurring,
       };
     });
+  };
+
+  const handleResetScheduledBudget = (categoryId: string) => {
+    setState((prev) => ({
+      ...prev,
+      monthlyBudgets: prev.monthlyBudgets.map((mb) =>
+        mb.monthKey === monthKey && mb.categoryId === categoryId
+          ? { ...mb, budgetManual: false }
+          : mb
+      ),
+    }));
   };
 
   const handleUpdateDirectActual = (
@@ -1104,12 +1145,16 @@ export function App() {
         opts.sourceMonthKey,
         'combined'
       );
-      const sourceRowMap = new Map<string, { budget: number; actual: number }>();
+      const sourceRowMap = new Map<
+        string,
+        { budget: number; actual: number | null }
+      >();
       for (const gs of sourceSummary.groups) {
         for (const r of gs.rows) {
           sourceRowMap.set(r.category.id, {
             budget: r.budget,
-            actual: r.actual,
+            // Auto-filled fixed costs are recomputed per month, not copied
+            actual: r.autoActual ? null : r.actual,
           });
         }
       }
@@ -1288,7 +1333,7 @@ export function App() {
     patch: Partial<
       Pick<
         CategoryItem,
-        'name' | 'defaultBudget' | 'taxRate' | 'deductiblePct'
+        'name' | 'defaultBudget' | 'taxRate' | 'deductiblePct' | 'targetAccountId'
       >
     >
   ) => {
@@ -1416,6 +1461,15 @@ export function App() {
     );
   };
 
+  const handleToggleCategoryFixed = (categoryId: string) => {
+    setState((prev) => ({
+      ...prev,
+      categories: prev.categories.map((c) =>
+        c.id === categoryId ? { ...c, isFixedCost: !c.isFixedCost } : c
+      ),
+    }));
+  };
+
   const handleAddRecurringRule = (ruleData: Omit<RecurringRule, 'id'>) => {
     setState((prev) => ({
       ...prev,
@@ -1443,7 +1497,14 @@ export function App() {
       let nextCategories = prev.categories;
       let nextBudgets = prev.monthlyBudgets;
 
-      if (targetRule && patch.amount !== undefined && patch.amount > 0) {
+      const updatedRule = nextRules.find((r) => r.id === id);
+      if (
+        targetRule &&
+        updatedRule &&
+        !isScheduledRule(updatedRule) &&
+        patch.amount !== undefined &&
+        patch.amount > 0
+      ) {
         const effectiveFreq = patch.frequency ?? targetRule.frequency;
         const monthlyEq =
           Math.round(recurringMonthlyEquivalent(patch.amount, effectiveFreq) * 100) /
@@ -1792,7 +1853,7 @@ export function App() {
     kind: CategoryKind;
     label: string;
     annualAmount: number;
-    schedule: 'monthly' | 'annual_lump';
+    schedule: YearlyPlanSchedule;
     accountId?: string;
     destinationAccountId?: string;
   }) => {
@@ -1810,6 +1871,9 @@ export function App() {
       name: opts.label,
       defaultBudget: monthlyDefault,
       order: state.categories.length + 1,
+      ...(opts.kind === 'savings' && opts.destinationAccountId
+        ? { targetAccountId: opts.destinationAccountId }
+        : {}),
     };
 
     const newPlanItem: YearlyPlanItem = {
@@ -2404,6 +2468,9 @@ export function App() {
               previousMonthHasData={previousMonthHasData}
               onUpdateBudget={handleUpdateBudget}
               onUpdateDirectActual={handleUpdateDirectActual}
+              onResetScheduledBudget={handleResetScheduledBudget}
+              onToggleCategoryFixed={handleToggleCategoryFixed}
+              accounts={state.accounts ?? []}
               onRenameCategory={(catId, name) =>
                 handleUpdateCategory(catId, { name })
               }
@@ -2496,6 +2563,7 @@ export function App() {
             <CategoriesStudioView
               groups={state.groups}
               categories={state.categories}
+              accounts={state.accounts ?? []}
               currency={state.settings.currency}
               initialMode={
                 state.settings.activeWorkspace === 'freelancer'

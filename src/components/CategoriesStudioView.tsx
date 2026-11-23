@@ -7,11 +7,13 @@ import {
   Sparkles,
   Repeat,
   ArrowLeftRight,
+  ArrowRight,
 } from 'lucide-react';
 import {
   CategoryGroup,
   CategoryItem,
   CategoryKind,
+  FinancialAccount,
   LedgerMode,
 } from '../types';
 import {
@@ -52,10 +54,12 @@ interface CategoriesStudioViewProps {
     patch: Partial<
       Pick<
         CategoryItem,
-        'name' | 'defaultBudget' | 'taxRate' | 'deductiblePct'
+        'name' | 'defaultBudget' | 'taxRate' | 'deductiblePct' | 'targetAccountId'
       >
     >
   ) => void;
+  /** Accounts offered as the target of savings categories */
+  accounts: FinancialAccount[];
   onToggleCategoryRecurring: (categoryId: string) => void;
   onDeleteCategory: (categoryId: string) => void;
   onOpenSetupWizard: () => void;
@@ -65,6 +69,7 @@ interface CategoriesStudioViewProps {
 export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
   groups,
   categories,
+  accounts,
   currency,
   initialMode,
   onAddGroup,
@@ -77,7 +82,7 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
   onOpenSetupWizard,
   onImportExcelOrCsv,
 }) => {
-  const { t, tf, tGroupName, tCategoryName } = useI18n();
+  const { t, tf, tGroupName, tCategoryName, tAccountName } = useI18n();
   const [editMode, setEditMode] = useState<LedgerMode>(initialMode);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupKind, setNewGroupKind] = useState<CategoryKind>('expense');
@@ -385,6 +390,35 @@ export const CategoriesStudioView: React.FC<CategoriesStudioViewProps> = ({
                           className="no-spinner w-20 h-6 px-1.5 rounded bg-raised border border-line text-right tabular-nums text-ink focus:outline-none"
                         />
                       </div>
+
+                      {cat.kind === 'savings' && (
+                        <div className="flex items-center gap-1">
+                          <ArrowRight className="w-3 h-3 text-indigo shrink-0" />
+                          <select
+                            value={cat.targetAccountId ?? ''}
+                            onChange={(e) =>
+                              onUpdateCategory(cat.id, {
+                                targetAccountId: e.target.value || undefined,
+                              })
+                            }
+                            title={t('categories.targetAccountTip')}
+                            className={`h-6 px-1.5 rounded border text-[11px] max-w-[170px] focus:outline-none ${
+                              cat.targetAccountId
+                                ? 'bg-indigo/10 border-indigo/30 text-ink'
+                                : 'bg-raised border-accent/60 text-ink-2'
+                            }`}
+                          >
+                            <option value="">{t('categories.targetAccountPick')}</option>
+                            {accounts
+                              .filter((a) => a.mode === cat.mode && a.classification !== 'liability')
+                              .map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {tAccountName(a)}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
 
                       {editMode === 'freelancer' && (
                         <>

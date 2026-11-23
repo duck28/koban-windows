@@ -329,6 +329,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="mt-0.5 rounded border-line"
             />
           </label>
+
+          <label className="flex items-start justify-between gap-4 p-3 rounded-lg bg-app border border-line cursor-pointer md:col-span-2">
+            <div>
+              <div className="text-xs font-medium text-ink">
+                {t('settings.fixedActualsTitle')}
+              </div>
+              <p className="text-[11px] text-ink-2 mt-0.5">
+                {t('settings.fixedActualsDesc')}
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.autoFillFixedActuals ?? true}
+              onChange={(e) =>
+                onUpdateSettings({ autoFillFixedActuals: e.target.checked })
+              }
+              className="mt-0.5 rounded border-line"
+            />
+          </label>
         </div>
       </section>
 

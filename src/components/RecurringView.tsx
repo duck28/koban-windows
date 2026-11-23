@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Plus,
   Trash2,
   Play,
   Repeat,
   CheckCircle2,
+  CalendarClock,
 } from 'lucide-react';
 import {
   ActiveWorkspace,
@@ -15,12 +16,18 @@ import {
   RecurringRule,
 } from '../types';
 import {
+  dateInIsoWeek,
   formatCurrency,
-  getRecurringDaysInMonth,
+  getRecurringOccurrenceDates,
+  isoWeekdayOfDate,
+  isoWeekOfDate,
+  recurringMonthInterval,
   recurringMonthlyEquivalent,
+  todayIso,
 } from '../utils/calculations';
 import { useI18n } from '../i18n';
 import { KobanSelect, KobanSelectOption } from './KobanSelect';
+import { InlineNumberInput } from './InlineNumberInput';
 
 interface RecurringViewProps {
   rules: RecurringRule[];
@@ -36,6 +43,33 @@ interface RecurringViewProps {
   onApplyRecurringToMonth: () => void;
 }
 
+const needsStartMonth = (f: RecurringFrequency) => recurringMonthInterval(f) > 1;
+
+/**
+ * Fields a rule needs when switching frequency: bi-weekly needs a start week
+ * (first occurrence date), bi-monthly / quarterly / yearly a start month.
+ * Missing ones are pre-filled so the picker shows up with a sensible value.
+ */
+export function scheduleDefaultsFor(
+  frequency: RecurringFrequency,
+  rule: Pick<RecurringRule, 'startDate' | 'startMonth' | 'dayOfMonth'>,
+  monthKey: string
+): Partial<RecurringRule> {
+  if (frequency === 'biweekly' && !rule.startDate) {
+    const today = todayIso();
+    const day = String(Math.min(28, Math.max(1, rule.dayOfMonth || 1))).padStart(2, '0');
+    const candidate = `${monthKey}-${day}`;
+    return { startDate: monthKey === today.slice(0, 7) ? today : candidate };
+  }
+  if (needsStartMonth(frequency) && !rule.startMonth) {
+    return { startMonth: monthKey };
+  }
+  return {};
+}
+
+const pickerClass =
+  'h-7 px-1.5 rounded bg-raised border text-[11px] text-ink tabular-nums focus:outline-none';
+
 export const RecurringView: React.FC<RecurringViewProps> = ({
   rules,
   groups,
@@ -49,7 +83,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
   onDeleteRule,
   onApplyRecurringToMonth,
 }) => {
-  const { t, tf, tGroupName, tCategoryName } = useI18n();
+  const { t, tf, tGroupName, tCategoryName, intlLocale } = useI18n();
   const modeFilter = (m: LedgerMode) =>
     workspace === 'combined' ? true : m === workspace;
 
@@ -62,6 +96,8 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<RecurringFrequency>('monthly');
   const [dayOfMonth, setDayOfMonth] = useState('1');
+  const [startDate, setStartDate] = useState<string>('');
+  const [startMonth, setStartMonth] = useState<string>('');
 
   const frequencyOptions: KobanSelectOption[] = [
     { value: 'biweekly', label: t('recurring.freqBiweekly') },
@@ -70,6 +106,25 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
     { value: 'quarterly', label: t('recurring.freqQuarterly') },
     { value: 'yearly', label: t('recurring.freqYearly') },
   ];
+
+  const weekdayOptions: KobanSelectOption[] = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat(intlLocale, {
+      weekday: 'short',
+      timeZone: 'UTC',
+    });
+    // 2024-01-01 was a Monday
+    return Array.from({ length: 7 }, (_, i) => ({
+      value: String(i),
+      label: fmt.format(new Date(Date.UTC(2024, 0, 1 + i))),
+    }));
+  }, [intlLocale]);
+
+  const formatShortDate = (iso: string) =>
+    new Intl.DateTimeFormat(intlLocale, {
+      day: '2-digit',
+      month: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(`${iso}T00:00:00Z`));
 
   const categoryOptions: KobanSelectOption[] = groups
     .filter((g) => modeFilter(g.mode))
@@ -83,13 +138,31 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
         }))
     );
 
+  const handleFormFrequency = (f: RecurringFrequency) => {
+    setFrequency(f);
+    const defaults = scheduleDefaultsFor(
+      f,
+      {
+        startDate: startDate || undefined,
+        startMonth: startMonth || undefined,
+        dayOfMonth: parseInt(dayOfMonth, 10) || 1,
+      },
+      monthKey
+    );
+    if (defaults.startDate) setStartDate(defaults.startDate);
+    if (defaults.startMonth) setStartMonth(defaults.startMonth);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const numAmt = parseFloat(amount);
     if (!categoryId || Number.isNaN(numAmt) || numAmt < 0) return;
     const cat = catMap.get(categoryId);
     if (!cat) return;
+    if (frequency === 'biweekly' && !startDate) return;
+    if (needsStartMonth(frequency) && !startMonth) return;
 
+    const day = Math.min(28, Math.max(1, parseInt(dayOfMonth, 10) || 1));
     onAddRule({
       mode: cat.mode,
       type: cat.kind === 'income' ? 'income' : 'expense',
@@ -97,7 +170,10 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       description: description.trim() || cat.name,
       amount: numAmt,
       frequency,
-      dayOfMonth: Math.min(28, Math.max(1, parseInt(dayOfMonth, 10) || 1)),
+      dayOfMonth:
+        frequency === 'biweekly' ? parseInt(startDate.slice(8, 10), 10) : day,
+      startDate: frequency === 'biweekly' ? startDate : undefined,
+      startMonth: needsStartMonth(frequency) ? startMonth : undefined,
       taxRate: cat.taxRate ?? 0,
       deductiblePct: cat.deductiblePct ?? 100,
       active: true,
@@ -119,11 +195,93 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       (acc, r) => acc + recurringMonthlyEquivalent(r.amount, r.frequency),
       0
     );
+  const dueThisMonthOutflow = visibleRules
+    .filter((r) => r.active && r.type === 'expense')
+    .reduce(
+      (acc, r) =>
+        acc + (getRecurringOccurrenceDates(r, monthKey)?.length ?? 0) * r.amount,
+      0
+    );
 
-  const addDayTip =
-    frequency === 'biweekly'
-      ? `${t('recurring.dayLabel')} ${getRecurringDaysInMonth('biweekly', parseInt(dayOfMonth, 10) || 1).join(' & ')}`
-      : t('recurring.dayRangeLabel');
+  /** Start-week / weekday or start-month pickers for a rule (or the add form). */
+  const renderStartPickers = (opts: {
+    frequency: RecurringFrequency;
+    startDate?: string;
+    startMonth?: string;
+    onStartDate: (d: string | undefined) => void;
+    onStartMonth: (m: string | undefined) => void;
+    compact?: boolean;
+  }) => {
+    const missingClass = 'border-accent/70 bg-accent/5';
+    if (opts.frequency === 'biweekly') {
+      const week = opts.startDate ? isoWeekOfDate(opts.startDate) ?? '' : '';
+      const weekday = opts.startDate ? isoWeekdayOfDate(opts.startDate) ?? 0 : 4;
+      return (
+        <>
+          <label className="inline-flex flex-col gap-1">
+            {!opts.compact && (
+              <span className="text-[11px] text-ink-2">{t('recurring.startWeekLabel')}</span>
+            )}
+            <input
+              type="week"
+              value={week}
+              required
+              title={t('recurring.startWeekLabel')}
+              onChange={(e) =>
+                opts.onStartDate(
+                  e.target.value
+                    ? dateInIsoWeek(e.target.value, weekday) ?? undefined
+                    : undefined
+                )
+              }
+              className={`${pickerClass} ${opts.compact ? '' : 'h-8 rounded-lg text-xs'} ${
+                week ? 'border-line' : missingClass
+              }`}
+            />
+          </label>
+          <label className="inline-flex flex-col gap-1">
+            {!opts.compact && (
+              <span className="text-[11px] text-ink-2">{t('recurring.weekdayLabel')}</span>
+            )}
+            <KobanSelect
+              value={String(weekday)}
+              onChange={(val) => {
+                const baseWeek = week || isoWeekOfDate(todayIso());
+                if (!baseWeek) return;
+                opts.onStartDate(dateInIsoWeek(baseWeek, Number(val)) ?? undefined);
+              }}
+              options={weekdayOptions}
+              searchable={false}
+              tone="default"
+              size={opts.compact ? 'xs' : 'sm'}
+              className={opts.compact ? 'w-[76px]' : 'w-[92px]'}
+              title={t('recurring.weekdayLabel')}
+            />
+          </label>
+        </>
+      );
+    }
+    if (needsStartMonth(opts.frequency)) {
+      return (
+        <label className="inline-flex flex-col gap-1">
+          {!opts.compact && (
+            <span className="text-[11px] text-ink-2">{t('recurring.startMonthLabel')}</span>
+          )}
+          <input
+            type="month"
+            value={opts.startMonth ?? ''}
+            required
+            title={t('recurring.startMonthLabel')}
+            onChange={(e) => opts.onStartMonth(e.target.value || undefined)}
+            className={`${pickerClass} ${opts.compact ? '' : 'h-8 rounded-lg text-xs'} ${
+              opts.startMonth ? 'border-line' : missingClass
+            }`}
+          />
+        </label>
+      );
+    }
+    return null;
+  };
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -190,7 +348,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             required
-            className="w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
+            className="no-spinner w-full h-8 px-2.5 rounded-lg bg-raised border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
           />
         </div>
 
@@ -200,7 +358,7 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           </label>
           <KobanSelect
             value={frequency}
-            onChange={(val) => setFrequency(val as RecurringFrequency)}
+            onChange={(val) => handleFormFrequency(val as RecurringFrequency)}
             options={frequencyOptions}
             searchable={false}
             tone="default"
@@ -209,20 +367,30 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
           />
         </div>
 
-        <div className="w-20 shrink-0">
-          <label className="block text-[11px] text-ink-2 mb-1 truncate">
-            {t('recurring.dayRangeLabel')}
-          </label>
-          <input
-            type="number"
-            min="1"
-            max="28"
-            value={dayOfMonth}
-            onChange={(e) => setDayOfMonth(e.target.value)}
-            title={addDayTip}
-            className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink text-center tabular-nums focus:outline-none"
-          />
-        </div>
+        {renderStartPickers({
+          frequency,
+          startDate: startDate || undefined,
+          startMonth: startMonth || undefined,
+          onStartDate: (d) => setStartDate(d ?? ''),
+          onStartMonth: (m) => setStartMonth(m ?? ''),
+        })}
+
+        {frequency !== 'biweekly' && (
+          <div className="w-20 shrink-0">
+            <label className="block text-[11px] text-ink-2 mb-1 truncate">
+              {t('recurring.dayRangeLabel')}
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="28"
+              value={dayOfMonth}
+              onChange={(e) => setDayOfMonth(e.target.value)}
+              title={t('recurring.dayRangeLabel')}
+              className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink text-center tabular-nums focus:outline-none"
+            />
+          </div>
+        )}
 
         <button
           type="submit"
@@ -242,6 +410,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
               {t('recurring.fixedOutflow')}{' '}
               <strong className="text-ink tabular-nums">
                 {formatCurrency(monthlyRecurringTotalOutflow, currency)}{t('recurring.perMonthSuffix')}
+              </strong>
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-ink-2">
+            <span>·</span>
+            <span>
+              {tf('recurring.dueInMonth', { month: monthKey })}{' '}
+              <strong className="text-ink tabular-nums">
+                {formatCurrency(dueThisMonthOutflow, currency)}
               </strong>
             </span>
           </div>
@@ -278,6 +455,10 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
             const ruleTitle = cat
               ? tCategoryName({ id: cat.id, name: rule.description })
               : tCategoryName(rule.description);
+            const dates = getRecurringOccurrenceDates(rule, monthKey);
+            const startMissing =
+              (rule.frequency === 'biweekly' && !rule.startDate) ||
+              (needsStartMonth(rule.frequency) && !rule.startMonth);
             return (
               <div
                 key={rule.id}
@@ -299,17 +480,38 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                         {ruleTitle}
                       </span>
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
                           rule.type === 'income'
                             ? 'bg-positive/15 text-positive'
-                            : 'bg-raised text-ink-2'
+                            : 'bg-indigo/12 text-indigo'
                         }`}
                       >
+                        <Repeat className="w-3 h-3" />
                         {rule.type === 'income' ? t('finance.income') : t('recurring.fixedBadge')}
                       </span>
                     </div>
-                    <div className="text-[11px] text-ink-3 truncate mt-0.5">
-                      {grp ? tGroupName(grp) : t('finance.category')} · {cat ? tCategoryName(cat) : ruleTitle}
+                    <div className="text-[11px] text-ink-3 truncate mt-0.5 flex items-center gap-1.5">
+                      <span className="truncate">
+                        {grp ? tGroupName(grp) : t('finance.category')} · {cat ? tCategoryName(cat) : ruleTitle}
+                      </span>
+                      <span>·</span>
+                      <span
+                        className={`inline-flex items-center gap-1 shrink-0 tabular-nums ${
+                          startMissing ? 'text-accent' : ''
+                        }`}
+                        title={startMissing ? t('recurring.startMissingTip') : undefined}
+                      >
+                        <CalendarClock className="w-3 h-3" />
+                        {startMissing
+                          ? t('recurring.setStart')
+                          : dates && dates.length > 0
+                            ? tf('recurring.thisMonth', {
+                                month: monthKey,
+                                dates: dates.map(formatShortDate).join(', '),
+                                amount: formatCurrency(dates.length * rule.amount, currency),
+                              })
+                            : tf('recurring.notThisMonth', { month: monthKey })}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -317,11 +519,13 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <KobanSelect
                     value={rule.frequency}
-                    onChange={(val) =>
+                    onChange={(val) => {
+                      const f = val as RecurringFrequency;
                       onUpdateRule(rule.id, {
-                        frequency: val as RecurringFrequency,
-                      })
-                    }
+                        frequency: f,
+                        ...scheduleDefaultsFor(f, rule, monthKey),
+                      });
+                    }}
                     options={frequencyOptions}
                     searchable={false}
                     tone="default"
@@ -330,45 +534,45 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                     title={t('recurring.freqLabel')}
                   />
 
-                  <div className="inline-flex items-center gap-1 text-[11px] text-ink-2">
-                    <span>{t('recurring.dayLabel')}</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="28"
-                      value={rule.dayOfMonth}
-                      title={
-                        rule.frequency === 'biweekly'
-                          ? `${t('recurring.dayLabel')} ${getRecurringDaysInMonth('biweekly', rule.dayOfMonth).join(' & ')}`
-                          : t('recurring.dayLabel')
-                      }
-                      onChange={(e) =>
-                        onUpdateRule(rule.id, {
-                          dayOfMonth: Math.min(
-                            28,
-                            Math.max(1, parseInt(e.target.value, 10) || 1)
-                          ),
-                        })
-                      }
-                      className="w-12 h-7 px-1.5 rounded bg-raised border border-line text-[11px] text-ink text-center tabular-nums focus:outline-none"
-                    />
-                  </div>
+                  {renderStartPickers({
+                    frequency: rule.frequency,
+                    startDate: rule.startDate,
+                    startMonth: rule.startMonth,
+                    compact: true,
+                    onStartDate: (d) =>
+                      onUpdateRule(rule.id, {
+                        startDate: d,
+                        ...(d ? { dayOfMonth: parseInt(d.slice(8, 10), 10) } : {}),
+                      }),
+                    onStartMonth: (m) => onUpdateRule(rule.id, { startMonth: m }),
+                  })}
+
+                  {rule.frequency !== 'biweekly' && (
+                    <div className="inline-flex items-center gap-1 text-[11px] text-ink-2">
+                      <span>{t('recurring.dayLabel')}</span>
+                      <InlineNumberInput
+                        step="1"
+                        decimals={0}
+                        align="center"
+                        clampMin={1}
+                        clampMax={28}
+                        value={rule.dayOfMonth}
+                        title={t('recurring.dayRangeLabel')}
+                        onValueChange={(v) =>
+                          onUpdateRule(rule.id, { dayOfMonth: Math.round(v) })
+                        }
+                        className="w-12 text-[11px]"
+                      />
+                    </div>
+                  )}
 
                   <div className="inline-flex items-center gap-1">
                     <span className="text-[11px] text-ink-3">{currency}</span>
-                    <input
-                      type="number"
-                      step="1"
+                    <InlineNumberInput
                       value={rule.amount}
-                      onChange={(e) =>
-                        onUpdateRule(rule.id, {
-                          amount: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      placeholder="0.00"
-                      className={`w-24 h-7 px-2 rounded bg-raised border border-line text-xs tabular-nums text-right font-semibold focus:outline-none ${
-                        rule.type === 'income' ? 'text-positive' : 'text-ink'
-                      }`}
+                      onValueChange={(v) => onUpdateRule(rule.id, { amount: v })}
+                      textClass={rule.type === 'income' ? 'text-positive' : 'text-ink'}
+                      className="w-24 font-semibold"
                     />
                   </div>
 

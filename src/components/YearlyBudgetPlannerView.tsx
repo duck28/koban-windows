@@ -18,12 +18,16 @@ import {
   LedgerMode,
   LedgerState,
   YearlyPlanItem,
+  YearlyPlanSchedule,
 } from '../types';
 import { useI18n } from '../i18n';
+import { InlineNumberInput } from './InlineNumberInput';
 import {
   formatCurrency,
   formatNumber,
   NetWorthSummaryMetrics,
+  planPeriodsPerYear,
+  planScheduleForFrequency,
   recurringAnnualEquivalent,
 } from '../utils/calculations';
 import {
@@ -50,7 +54,7 @@ interface YearlyBudgetPlannerViewProps {
     kind: CategoryKind;
     label: string;
     annualAmount: number;
-    schedule: 'monthly' | 'annual_lump';
+    schedule: YearlyPlanSchedule;
     accountId?: string;
     destinationAccountId?: string;
   }) => void;
@@ -132,9 +136,25 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
       ''
   );
   const [quickAmount, setQuickAmount] = useState('');
-  const [quickSchedule, setQuickSchedule] = useState<'annual_lump' | 'monthly'>(
+  const [quickSchedule, setQuickSchedule] = useState<YearlyPlanSchedule>(
     'annual_lump'
   );
+
+  const scheduleOptions: { value: YearlyPlanSchedule; label: string }[] = [
+    { value: 'biweekly', label: t('recurring.freqBiweekly') },
+    { value: 'monthly', label: t('recurring.freqMonthly') },
+    { value: 'bimonthly', label: t('recurring.freqBimonthly') },
+    { value: 'quarterly', label: t('recurring.freqQuarterly') },
+    { value: 'annual_lump', label: t('recurring.freqYearly') },
+  ];
+  const perPeriodShort = (s: YearlyPlanSchedule) =>
+    s === 'biweekly'
+      ? t('yearly.perBiweeklyShort')
+      : s === 'bimonthly'
+        ? t('yearly.perBimonthlyShort')
+        : s === 'quarterly'
+          ? t('yearly.perQuarterShort')
+          : t('yearly.moShort');
   const [quickAccountId, setQuickAccountId] = useState<string>(
     defaultLiquidAccountId
   );
@@ -171,9 +191,11 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
       }
     }
     const recMap = new Map<string, number>();
+    const recSchedule = new Map<string, YearlyPlanSchedule>();
     for (const r of state.recurringRules) {
       if (r.active && r.amount > 0) {
         recMap.set(r.categoryId, recurringAnnualEquivalent(r.amount, r.frequency));
+        recSchedule.set(r.categoryId, planScheduleForFrequency(r.frequency));
       }
     }
 
@@ -215,8 +237,8 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
 
       const primaryAcc =
         cat.mode === 'freelancer' ? bizChecking : homeChecking;
-      let destAcc: string | undefined;
-      if (cat.kind === 'savings') {
+      let destAcc: string | undefined = cat.kind === 'savings' ? cat.targetAccountId : undefined;
+      if (cat.kind === 'savings' && !destAcc) {
         const lower = cat.name.toLowerCase();
         if (
           lower.includes('retirement') ||
@@ -245,7 +267,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
         label: cat.name,
         kind: cat.kind,
         annualAmount: annualVal,
-        schedule: 'monthly',
+        schedule: recSchedule.get(cat.id) ?? 'monthly',
         accountId: primaryAcc,
         destinationAccountId: destAcc,
       });
@@ -419,8 +441,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
       state.groups[0];
     if (!grp) return;
 
-    const annualAmount =
-      quickSchedule === 'monthly' ? rawAmt * 12 : rawAmt;
+    const annualAmount = rawAmt * planPeriodsPerYear(quickSchedule);
 
     onAddCategoryAndPlanItem({
       year: planningYear,
@@ -492,7 +513,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
       accountId: defaultLiquidAccountId || undefined,
       destinationAccountId:
         cat.kind === 'savings'
-          ? defaultInvestmentAccountId || undefined
+          ? cat.targetAccountId || defaultInvestmentAccountId || undefined
           : undefined,
     };
     onUpsertYearlyPlanItem({
@@ -720,20 +741,16 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                     {/* Expected Annual Return / Yield % Input */}
                     {acc.classification !== 'liability' && (
                       <div
-                        className="flex items-center gap-1 bg-surface border border-line rounded-md px-1.5 py-0.5 shrink-0"
+                        className="flex items-center gap-1 rounded-md pl-1.5 pr-1 shrink-0"
                       >
                         <TrendingUp className="w-3 h-3 text-positive" />
-                        <input
-                          type="number"
+                        <InlineNumberInput
                           step="0.5"
                           value={proj.returnRatePct}
-                          onChange={(e) =>
-                            onUpdateAccountReturnRate(
-                              acc.id,
-                              parseFloat(e.target.value) || 0
-                            )
+                          onValueChange={(v) =>
+                            onUpdateAccountReturnRate(acc.id, v)
                           }
-                          className="no-spinner w-9 bg-transparent text-[11px] text-ink font-medium tabular-nums text-right focus:outline-none"
+                          className="w-14 text-[11px] font-medium"
                         />
                         <span className="text-[10px] text-ink-3">{t('yearly.perAnnum')}</span>
                       </div>
@@ -934,20 +951,30 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
             <select
               value={quickSchedule}
               onChange={(e) =>
-                setQuickSchedule(e.target.value as 'annual_lump' | 'monthly')
+                setQuickSchedule(e.target.value as YearlyPlanSchedule)
               }
               className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
             >
-              <option value="annual_lump">{tf('yearly.annualTotalOpt', { year: planningYear })}</option>
-              <option value="monthly">{t('yearly.monthly12Opt')}</option>
+              {scheduleOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.value === 'annual_lump'
+                    ? tf('yearly.annualTotalOpt', { year: planningYear })
+                    : o.label}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="flex-[1_1_115px] min-w-[105px]">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
-              {quickSchedule === 'monthly'
-                ? tf('yearly.monthlyCurrencyLabel', { currency })
-                : tf('yearly.annualCurrencyLabel', { currency })}
+              {quickSchedule === 'annual_lump'
+                ? tf('yearly.annualCurrencyLabel', { currency })
+                : quickSchedule === 'monthly'
+                  ? tf('yearly.monthlyCurrencyLabel', { currency })
+                  : tf('yearly.perPaymentCurrencyLabel', {
+                      currency,
+                      freq: scheduleOptions.find((o) => o.value === quickSchedule)?.label ?? '',
+                    })}
             </label>
             <input
               type="number"
@@ -1111,12 +1138,15 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                   {filteredRows.map((cat) => {
                     const plan = planByCategoryId.get(cat.id);
                     const annualAmt = plan?.annualAmount ?? 0;
-                    const monthlyAmt = annualAmt / 12;
-                    const schedule =
+                    const schedule: YearlyPlanSchedule =
                       plan?.schedule ??
                       (cat.isRecurring ? 'monthly' : 'annual_lump');
+                    const periods = planPeriodsPerYear(schedule);
+                    const perPeriodAmt = annualAmt / periods;
                     const linkedAccId = plan?.accountId ?? '';
-                    const destAccId = plan?.destinationAccountId ?? '';
+                    const destAccId =
+                      plan?.destinationAccountId ??
+                      (cat.kind === 'savings' ? cat.targetAccountId ?? '' : '');
 
                     const destAccObj = visibleAccounts.find(
                       (a) => a.account.id === (destAccId || linkedAccId)
@@ -1182,62 +1212,50 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
                             value={schedule}
                             onChange={(e) =>
                               updateCategoryPlan(cat, {
-                                schedule: e.target.value as
-                                  | 'monthly'
-                                  | 'annual_lump',
+                                schedule: e.target.value as YearlyPlanSchedule,
                               })
                             }
                             className="h-7 px-2 rounded bg-raised border border-line text-[11px] text-ink-2 focus:text-ink focus:outline-none"
                             title={t('yearly.scheduleLabel')}
                           >
-                            <option value="monthly">{t('yearly.monthly12Opt')}</option>
-                            <option value="annual_lump">{t('yearly.annualTotalSimple')}</option>
+                            {scheduleOptions.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
                           </select>
 
-                          {/* Monthly Amount Input */}
-                          <div className="inline-flex items-center gap-1">
-                            <span className="text-[10px] text-ink-3">{t('yearly.moShort')}</span>
-                            <input
-                              type="number"
-                              step="10"
-                              value={
-                                monthlyAmt === 0
-                                  ? ''
-                                  : Number(monthlyAmt.toFixed(2))
-                              }
-                              placeholder="0"
-                              onChange={(e) => {
-                                const m = parseFloat(e.target.value) || 0;
-                                updateCategoryPlan(cat, {
-                                  annualAmount: m * 12,
-                                  schedule: 'monthly',
-                                });
-                              }}
-                              className="no-spinner w-20 h-7 px-2 rounded bg-raised border border-line text-right tabular-nums text-ink-2 focus:text-ink focus:outline-none"
-                            />
-                          </div>
+                          {/* Per-payment Amount Input (annual = per payment × payments per year) */}
+                          {schedule !== 'annual_lump' && (
+                            <div className="inline-flex items-center gap-1">
+                              <span className="text-[10px] text-ink-3">{perPeriodShort(schedule)}</span>
+                              <InlineNumberInput
+                                value={perPeriodAmt}
+                                onValueChange={(v) =>
+                                  updateCategoryPlan(cat, {
+                                    annualAmount: v * periods,
+                                    schedule,
+                                  })
+                                }
+                                textClass="text-ink-2 focus:text-ink"
+                                className="w-20"
+                              />
+                            </div>
+                          )}
 
                           {/* Annual Amount Input */}
                           <div className="inline-flex items-center gap-1">
                             <span className="text-[10px] text-ink-3 font-medium">
                               {tf('yearly.yearCurrency', { currency })}
                             </span>
-                            <input
-                              type="number"
-                              step="50"
-                              value={
-                                annualAmt === 0
-                                  ? ''
-                                  : Number(annualAmt.toFixed(2))
-                              }
-                              placeholder="0"
-                              onChange={(e) => {
-                                const yrVal = parseFloat(e.target.value) || 0;
+                            <InlineNumberInput
+                              value={annualAmt}
+                              onValueChange={(yrVal) =>
                                 updateCategoryPlan(cat, {
                                   annualAmount: yrVal,
-                                });
-                              }}
-                              className="no-spinner w-24 h-7 px-2 rounded bg-surface border border-line text-right tabular-nums font-semibold text-ink focus:border-ink focus:outline-none"
+                                })
+                              }
+                              className="w-24 font-semibold"
                             />
                           </div>
 

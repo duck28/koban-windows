@@ -97,6 +97,17 @@ export interface CategoryItem {
   defaultBudget: number;
   /** Whether this category is marked as a recurring monthly item */
   isRecurring?: boolean;
+  /**
+   * Fixed cost (anchor toggle): the month's Actual automatically equals its Budget
+   * unless an Actual is typed or transactions are logged. Independent of isRecurring.
+   */
+  isFixedCost?: boolean;
+  /**
+   * Savings categories: account the money is moved into (e.g. ETF portfolio, Pillar 3a).
+   * Savings transactions then count as a transfer — out of their source account, into this
+   * one — so net worth is unchanged instead of dropping as if the money were spent.
+   */
+  targetAccountId?: string;
   /** Default VAT / Sales Tax % for Freelancer items (e.g. 8.1, 19, 0) */
   taxRate?: number;
   /** Tax Deductible % for Freelancer expenses (e.g. 100, 50, 0) */
@@ -114,6 +125,11 @@ export interface MonthlyBudgetEntry {
    * When null/undefined, Actual is computed as the sum of Transactions for that category & month.
    */
   directActual?: number | null;
+  /**
+   * True when the user typed this month's Budget for a category whose budget is
+   * otherwise derived from a scheduled recurring rule (bi-weekly / bi-monthly…).
+   */
+  budgetManual?: boolean;
 }
 
 export interface TransactionItem {
@@ -233,6 +249,17 @@ export interface RecurringRule {
   amount: number;
   frequency: RecurringFrequency;
   dayOfMonth: number;
+  /**
+   * Bi-weekly only: date (YYYY-MM-DD) of the first occurrence. Every further
+   * occurrence is 14 days later. Picked as a start week + weekday in the UI.
+   * Absent on legacy rules ⇒ two occurrences per month (dayOfMonth & +14).
+   */
+  startDate?: string;
+  /**
+   * Bi-monthly / quarterly / yearly: first month (YYYY-MM) the item is due.
+   * The rule then repeats every 2 / 3 / 12 months from it.
+   */
+  startMonth?: string;
   client?: string;
   taxRate?: number;
   deductiblePct?: number;
@@ -284,6 +311,11 @@ export interface AppSettings {
   confirmBeforeDelete?: boolean;
   defaultHideZeroRows?: boolean;
   confirmAndPreviewBeforeImport?: boolean;
+  /**
+   * Fixed-cost categories: Actual automatically equals Budget until transactions
+   * are logged or the user types an Actual. Absent ⇒ true.
+   */
+  autoFillFixedActuals?: boolean;
   /** UI language code (e.g. 'en', 'de', 'hu', 'ja') */
   language?: string;
   /** Vault owner display name stored safely inside ledger settings */
@@ -348,6 +380,13 @@ export interface WebDavRemoteInfo {
   last_modified?: string;
 }
 
+export type YearlyPlanSchedule =
+  | 'biweekly'
+  | 'monthly'
+  | 'bimonthly'
+  | 'quarterly'
+  | 'annual_lump';
+
 export interface YearlyPlanItem {
   id: string;
   year: number;
@@ -358,8 +397,11 @@ export interface YearlyPlanItem {
   kind: CategoryKind;
   /** Total planned amount for the full year (e.g. 11000 for Tuition Fees) */
   annualAmount: number;
-  /** Whether entered as a monthly recurring amount (annual = monthly * 12) or an annual lump-sum/total */
-  schedule: 'monthly' | 'annual_lump';
+  /**
+   * How often the amount falls due (annual = per-payment amount × payments per year):
+   * bi-weekly (26), monthly (12), bi-monthly (6), quarterly (4) or a yearly lump sum (1).
+   */
+  schedule: YearlyPlanSchedule;
   /** Primary account this planned income/expense corresponds to (paid from / deposited into) */
   accountId?: string;
   /**

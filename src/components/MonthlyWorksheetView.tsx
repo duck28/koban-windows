@@ -12,11 +12,14 @@ import {
   ArrowRight,
   AlertTriangle,
   X,
+  Anchor,
+  CalendarClock,
 } from 'lucide-react';
 import {
   ActiveWorkspace,
   AppSettings,
   CategoryKind,
+  FinancialAccount,
   LedgerMode,
   MonthCopyScope,
 } from '../types';
@@ -39,8 +42,12 @@ interface MonthlyWorksheetViewProps {
   previousMonthHasData: boolean;
   onUpdateBudget: (categoryId: string, newBudget: number) => void;
   onUpdateDirectActual: (categoryId: string, newActual: number | null) => void;
+  onResetScheduledBudget: (categoryId: string) => void;
   onRenameCategory: (categoryId: string, newName: string) => void;
   onToggleCategoryRecurring: (categoryId: string) => void;
+  onToggleCategoryFixed: (categoryId: string) => void;
+  /** For the savings target-account badge */
+  accounts: FinancialAccount[];
   onDeleteCategory: (categoryId: string) => void;
   onAddCategory: (
     groupId: string,
@@ -76,8 +83,11 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
   previousMonthHasData,
   onUpdateBudget,
   onUpdateDirectActual,
+  onResetScheduledBudget,
   onRenameCategory,
   onToggleCategoryRecurring,
+  onToggleCategoryFixed,
+  accounts,
   onDeleteCategory,
   onAddCategory,
   onAddGroup,
@@ -86,7 +96,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
   onApplyBudgetsToAllMonths,
   onCopyMonthValues,
 }) => {
-  const { t, tf, tGroupName, tCategoryName } = useI18n();
+  const { t, tf, tGroupName, tCategoryName, tAccountName } = useI18n();
   const [hideZeroRows, setHideZeroRows] = useState(
     settings.defaultHideZeroRows ?? false
   );
@@ -251,32 +261,52 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         key={row.category.id}
         className="group grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-1.5 border-b border-line/60 last:border-b-0 hover:bg-raised/60 transition-colors text-[12px]"
       >
-        {/* Category Name + Recurring Toggle + Optional Freelancer / Tx Badges */}
+        {/* Category Name + badges, then the row icons in fixed slots so they line up across rows */}
         <div className="flex items-center gap-1.5 min-w-0 pr-1">
           <input
             type="text"
             value={displayCategoryName}
             onChange={(e) => onRenameCategory(row.category.id, e.target.value)}
-            className="w-full bg-transparent text-ink truncate focus:outline-none focus:bg-surface focus:px-1.5 rounded"
+            className="flex-1 min-w-0 bg-transparent text-ink truncate focus:outline-none focus:bg-surface focus:px-1.5 rounded"
             title={displayCategoryName}
           />
-          <button
-            type="button"
-            onClick={() => onToggleCategoryRecurring(row.category.id)}
-            aria-pressed={Boolean(row.category.isRecurring)}
-            className={`p-1 rounded transition-colors shrink-0 cursor-pointer ${
-              row.category.isRecurring
-                ? 'bg-indigo/18 text-indigo border border-indigo/40 hover:bg-indigo/25'
-                : 'text-ink-2/80 border border-transparent hover:text-indigo hover:bg-indigo/12 hover:border-indigo/30'
-            }`}
-            title={
-              row.category.isRecurring
-                ? t('worksheet.recurringDisableTip')
-                : t('worksheet.recurringEnableTip')
-            }
-          >
-            <Repeat className="w-3.5 h-3.5" />
-          </button>
+
+          {/* Variable-width badges (left of the icon slots, so they never shift the icons) */}
+          {row.group.kind === 'savings' && (() => {
+            const target = accounts.find((a) => a.id === row.category.targetAccountId);
+            return (
+              <span
+                className={`inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] shrink min-w-0 max-w-[110px] ${
+                  target ? 'bg-indigo/10 text-indigo' : 'bg-accent/10 text-accent'
+                }`}
+                title={
+                  target
+                    ? tf('worksheet.savingsTargetTip', { account: tAccountName(target) })
+                    : t('worksheet.savingsNoTargetTip')
+                }
+              >
+                <ArrowRight className="w-3 h-3 shrink-0" />
+                <span className="truncate">{target ? tAccountName(target) : '?'}</span>
+              </span>
+            );
+          })()}
+          {row.budgetOverridesSchedule ? (
+            <button
+              type="button"
+              onClick={() => onResetScheduledBudget(row.category.id)}
+              className="w-6 h-6 inline-flex items-center justify-center rounded border border-transparent text-indigo/80 hover:text-indigo hover:bg-surface hover:border-line transition-colors cursor-pointer"
+              title={t('worksheet.manualBudgetTip')}
+            >
+              <CalendarClock className="w-3.5 h-3.5" />
+            </button>
+          ) : row.budgetFromSchedule ? (
+            <span
+              className="w-6 h-6 inline-flex items-center justify-center text-indigo/80"
+              title={t('worksheet.scheduledBudgetTip')}
+            >
+              <CalendarClock className="w-3.5 h-3.5" />
+            </span>
+          ) : null}
           {row.txCount > 0 && row.directActual === null && (
             <span
               className="px-1.5 py-0.2 rounded text-[10px] bg-raised text-ink-2 border border-line/70 tabular-nums shrink-0"
@@ -284,16 +314,6 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             >
               {tf('worksheet.txCountSuffix', { count: row.txCount })}
             </span>
-          )}
-          {row.directActual !== null && (
-            <button
-              type="button"
-              onClick={() => onUpdateDirectActual(row.category.id, null)}
-              className="p-1 rounded border border-transparent text-ink-2/85 hover:text-ink hover:bg-surface hover:border-line transition-colors shrink-0 cursor-pointer"
-              title={t('worksheet.manualActualTip')}
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
           )}
           {row.category.mode === 'freelancer' &&
             (row.category.taxRate ||
@@ -306,6 +326,60 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                   : ''}
               </span>
             )}
+
+          {/* Fixed icon slots: recurring · fixed cost · reset Actual (empty slot when absent) */}
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onToggleCategoryRecurring(row.category.id)}
+              aria-pressed={Boolean(row.category.isRecurring)}
+              className={`w-6 h-6 inline-flex items-center justify-center rounded transition-colors cursor-pointer ${
+                row.category.isRecurring
+                  ? 'bg-indigo/18 text-indigo border border-indigo/40 hover:bg-indigo/25'
+                  : 'text-ink-2/80 border border-transparent hover:text-indigo hover:bg-indigo/12 hover:border-indigo/30'
+              }`}
+              title={
+                row.category.isRecurring
+                  ? t('worksheet.recurringDisableTip')
+                  : t('worksheet.recurringEnableTip')
+              }
+            >
+              <Repeat className="w-3.5 h-3.5" />
+            </button>
+            {row.group.kind !== 'income' ? (
+              <button
+                type="button"
+                onClick={() => onToggleCategoryFixed(row.category.id)}
+                aria-pressed={row.isFixedCost}
+                className={`w-6 h-6 inline-flex items-center justify-center rounded transition-colors cursor-pointer ${
+                  row.isFixedCost
+                    ? 'bg-indigo/18 text-indigo border border-indigo/40 hover:bg-indigo/25'
+                    : 'text-ink-2/80 border border-transparent hover:text-indigo hover:bg-indigo/12 hover:border-indigo/30'
+                }`}
+                title={
+                  row.isFixedCost
+                    ? t('worksheet.fixedCostTip')
+                    : t('worksheet.fixedCostEnableTip')
+                }
+              >
+                <Anchor className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <span className="w-6 h-6" aria-hidden="true" />
+            )}
+            {row.directActual !== null ? (
+              <button
+                type="button"
+                onClick={() => onUpdateDirectActual(row.category.id, null)}
+                className="w-6 h-6 inline-flex items-center justify-center rounded border border-transparent text-ink-2/85 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
+                title={t('worksheet.manualActualTip')}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <span className="w-6 h-6" aria-hidden="true" />
+            )}
+          </div>
         </div>
 
         {/* Budget Input */}
@@ -334,7 +408,10 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               const v = e.target.value === '' ? 0 : parseFloat(e.target.value);
               onUpdateDirectActual(row.category.id, Number.isNaN(v) ? 0 : v);
             }}
-            className="no-spinner w-full h-6 px-1.5 text-right tabular-nums rounded bg-transparent hover:bg-surface focus:bg-surface border border-transparent focus:border-line text-ink font-medium focus:outline-none"
+            title={row.autoActual ? t('worksheet.autoActualTip') : undefined}
+            className={`no-spinner w-full h-6 px-1.5 text-right tabular-nums rounded bg-transparent hover:bg-surface focus:bg-surface border border-transparent focus:border-line font-medium focus:outline-none ${
+              row.autoActual ? 'text-indigo italic focus:not-italic focus:text-ink' : 'text-ink'
+            }`}
           />
         </div>
 

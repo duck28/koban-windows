@@ -975,6 +975,7 @@ export function createInitialLedgerState(
       autoPromptCopyOnEmptyMonth: true,
       confirmBeforeDelete: true,
       defaultHideZeroRows: false,
+      autoFillFixedActuals: true,
       confirmAndPreviewBeforeImport: true,
       autoCheckUpdates: true,
     },

@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
-import { RecurringRule, TransactionItem } from '../src/types';
+import { CategoryItem, FinancialAccount, RecurringRule, TransactionItem } from '../src/types';
 import {
+  computeAccountLiveBalance,
+  planPeriodsPerYear,
+  planScheduleForFrequency,
+  savingsTargetMap,
   buildRecurringTransactionsForMonth,
+  dateInIsoWeek,
+  getRecurringOccurrenceDates,
+  isoWeekdayOfDate,
+  isoWeekOfDate,
+  isScheduledRule,
+  recurringAmountForMonth,
   getRecurringDaysInMonth,
   recurringAnnualEquivalent,
   recurringMonthInterval,
@@ -211,5 +221,120 @@ assert.equal(
     .newTransactions.length,
   1
 );
+
+// 8. ISO week helpers
+assert.equal(isoWeekOfDate('2026-11-20'), '2026-W47');
+assert.equal(isoWeekOfDate('2027-01-01'), '2026-W53');
+assert.equal(isoWeekOfDate('2024-12-30'), '2025-W01');
+assert.equal(isoWeekdayOfDate('2026-11-20'), 4); // Friday
+assert.equal(dateInIsoWeek('2026-W47', 4), '2026-11-20');
+assert.equal(dateInIsoWeek('2025-W01', 0), '2024-12-30');
+
+// 9. Bi-weekly with a start week: true 14-day cadence, 3-payment months
+const bwScheduled = makeRule({
+  id: 'rec-bws',
+  type: 'income',
+  amount: 1000,
+  frequency: 'biweekly',
+  dayOfMonth: 2,
+  startDate: '2026-01-02', // Friday
+});
+assert.ok(isScheduledRule(bwScheduled));
+assert.deepEqual(getRecurringOccurrenceDates(bwScheduled, '2025-12'), []);
+assert.deepEqual(getRecurringOccurrenceDates(bwScheduled, '2026-01'), [
+  '2026-01-02',
+  '2026-01-16',
+  '2026-01-30',
+]);
+assert.deepEqual(getRecurringOccurrenceDates(bwScheduled, '2026-02'), [
+  '2026-02-13',
+  '2026-02-27',
+]);
+assert.equal(recurringAmountForMonth(bwScheduled, '2026-01'), 3000);
+assert.equal(recurringAmountForMonth(bwScheduled, '2026-02'), 2000);
+// Over a full year: 26 payments
+let bwYear = 0;
+for (let m = 1; m <= 12; m++) {
+  bwYear += getRecurringOccurrenceDates(bwScheduled, `2026-${String(m).padStart(2, '0')}`)!.length;
+}
+assert.equal(bwYear, 26);
+const bwsPosted = buildRecurringTransactionsForMonth([bwScheduled], [], '2026-01', 'home');
+assert.deepEqual(
+  bwsPosted.newTransactions.map((t) => t.date),
+  ['2026-01-02', '2026-01-16', '2026-01-30']
+);
+assert.equal(
+  buildRecurringTransactionsForMonth([bwScheduled], bwsPosted.newTransactions, '2026-01', 'home')
+    .newTransactions.length,
+  0
+);
+
+// 10. Bi-monthly / quarterly with a start month
+const bmScheduled = makeRule({
+  id: 'rec-bms',
+  amount: 120,
+  frequency: 'bimonthly',
+  dayOfMonth: 10,
+  startMonth: '2026-12',
+});
+assert.ok(isScheduledRule(bmScheduled));
+assert.equal(recurringAmountForMonth(bmScheduled, '2026-11'), 0);
+assert.equal(recurringAmountForMonth(bmScheduled, '2026-12'), 120);
+assert.equal(recurringAmountForMonth(bmScheduled, '2027-01'), 0);
+assert.equal(recurringAmountForMonth(bmScheduled, '2027-02'), 120);
+assert.equal(
+  buildRecurringTransactionsForMonth([bmScheduled], [], '2027-01', 'home').newTransactions.length,
+  0
+);
+assert.deepEqual(
+  buildRecurringTransactionsForMonth([bmScheduled], [], '2027-02', 'home').newTransactions.map(
+    (t) => t.date
+  ),
+  ['2027-02-10']
+);
+const qScheduled = makeRule({ id: 'rec-qs', frequency: 'quarterly', startMonth: '2026-02' });
+assert.equal(recurringAmountForMonth(qScheduled, '2026-05'), 100);
+assert.equal(recurringAmountForMonth(qScheduled, '2026-06'), 0);
+// Legacy bi-monthly without a start month: unknown per-month amount
+assert.equal(recurringAmountForMonth(bimonthlyRule, '2026-11'), null);
+assert.equal(isScheduledRule(bimonthlyRule), false);
+
+// 11. Savings with a target account move money between accounts (net worth unchanged)
+const acc = (p: Partial<FinancialAccount>): FinancialAccount => ({
+  id: 'a', name: 'A', mode: 'home', type: 'checking', classification: 'liquid',
+  startingBalance: 1000, currentBalance: 1000, autoTrackTransactions: true,
+  includeInNetWorth: true, color: '#000', updatedAt: '2026-01-01', ...p,
+});
+const checking = acc({ id: 'chk' });
+const etfTracked = acc({ id: 'etf', classification: 'investment', startingBalance: 5000 });
+const etfManual = acc({ id: 'etf2', classification: 'investment', autoTrackTransactions: false,
+  currentBalance: 5000, updatedAt: '2026-02-01' });
+const savingsCat = { id: 'c-etf', groupId: 'g', mode: 'home', name: 'ETF', kind: 'savings',
+  defaultBudget: 0, order: 0, targetAccountId: 'etf' } as CategoryItem;
+const savingTxs: TransactionItem[] = [
+  { id: 't1', date: '2026-01-15', monthKey: '2026-01', mode: 'home', type: 'expense',
+    categoryId: 'c-etf', accountId: 'chk', description: 'ETF', amount: 500 },
+  { id: 't2', date: '2026-02-15', monthKey: '2026-02', mode: 'home', type: 'expense',
+    categoryId: 'c-etf', accountId: 'chk', description: 'ETF', amount: 500 },
+];
+const targets = savingsTargetMap([savingsCat]);
+const chkBal = computeAccountLiveBalance(checking, savingTxs, targets).liveBalance;
+const etfBal = computeAccountLiveBalance(etfTracked, savingTxs, targets).liveBalance;
+assert.equal(chkBal, 0);
+assert.equal(etfBal, 6000);
+assert.equal(chkBal + etfBal, 1000 + 5000); // net worth unchanged
+// Manually valued target: only transfers after its last valuation (2026-02-01) are added
+const manualTargets = savingsTargetMap([{ ...savingsCat, targetAccountId: 'etf2' }]);
+assert.equal(computeAccountLiveBalance(etfManual, savingTxs, manualTargets).liveBalance, 5500);
+// Without a target the saving only leaves the source account (old behaviour)
+assert.equal(computeAccountLiveBalance(etfTracked, savingTxs, new Map()).liveBalance, 5000);
+
+// 12. Yearly planner schedules
+assert.equal(planPeriodsPerYear('biweekly'), 26);
+assert.equal(planPeriodsPerYear('bimonthly'), 6);
+assert.equal(planPeriodsPerYear('quarterly'), 4);
+assert.equal(planPeriodsPerYear('annual_lump'), 1);
+assert.equal(planScheduleForFrequency('yearly'), 'annual_lump');
+assert.equal(planScheduleForFrequency('quarterly'), 'quarterly');
 
 console.log('ALL RECURRING FREQUENCY ASSERTIONS PASSED');

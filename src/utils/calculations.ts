@@ -8,6 +8,7 @@ import {
   RecurringFrequency,
   RecurringRule,
   TransactionItem,
+  YearlyPlanSchedule,
 } from '../types';
 import { formatMonthKey } from '../data/templates';
 
@@ -27,6 +28,14 @@ export interface CategoryComputedRow {
   txCount: number;
   deductibleActual: number;
   vatAmount: number;
+  /** Budget comes from a scheduled recurring rule (bi-weekly / bi-monthly / quarterly / yearly) */
+  budgetFromSchedule: boolean;
+  /** Budget typed by hand this month although a recurring schedule exists */
+  budgetOverridesSchedule: boolean;
+  /** Category is marked as a fixed cost (anchor toggle) */
+  isFixedCost: boolean;
+  /** Actual is the Budget filled in automatically (fixed cost, no transactions, no typed Actual) */
+  autoActual: boolean;
 }
 
 export interface GroupComputedSummary {
@@ -100,14 +109,33 @@ export function computeMonthSummary(
     .filter((c) => filterMode(c.mode))
     .sort((a, b) => a.order - b.order);
 
-  const monthBudgetsMap = new Map<string, { budget: number; directActual: number | null }>();
+  const monthBudgetsMap = new Map<
+    string,
+    { budget: number; directActual: number | null; budgetManual: boolean }
+  >();
   for (const mb of state.monthlyBudgets) {
     if (mb.monthKey === monthKey) {
       monthBudgetsMap.set(mb.categoryId, {
         budget: mb.budget,
         directActual: mb.directActual ?? null,
+        budgetManual: mb.budgetManual ?? false,
       });
     }
+  }
+
+  // Fixed costs: Actual follows Budget (setting, absent ⇒ on)
+  const autoFillFixed = state.settings.autoFillFixedActuals ?? true;
+
+  // Recurring rules with a start week / month: the budget varies per month
+  const scheduledBudgetByCat = new Map<string, number>();
+  for (const r of state.recurringRules ?? []) {
+    if (!r.active || !(r.amount > 0) || !isScheduledRule(r)) continue;
+    const amt = recurringAmountForMonth(r, monthKey);
+    if (amt === null) continue;
+    scheduledBudgetByCat.set(
+      r.categoryId,
+      (scheduledBudgetByCat.get(r.categoryId) ?? 0) + amt
+    );
   }
 
   const monthTxs = state.transactions.filter(
@@ -135,10 +163,22 @@ export function computeMonthSummary(
     const cats = activeCategories.filter((c) => c.groupId === group.id);
     const rows: CategoryComputedRow[] = cats.map((cat) => {
       const mb = monthBudgetsMap.get(cat.id);
-      const budget = mb !== undefined ? mb.budget : cat.defaultBudget;
+      const scheduledBudget = scheduledBudgetByCat.get(cat.id);
+      const budgetFromSchedule =
+        scheduledBudget !== undefined && !(mb?.budgetManual ?? false);
+      const budget = budgetFromSchedule
+        ? scheduledBudget
+        : mb !== undefined
+          ? mb.budget
+          : cat.defaultBudget;
       const txStats = txByCat.get(cat.id) ?? { sum: 0, count: 0, deductible: 0, vat: 0 };
       const directActual = mb?.directActual ?? null;
-      const actual = directActual !== null ? directActual : txStats.sum;
+      const isFixedCost = Boolean(cat.isFixedCost);
+      const autoActual =
+        autoFillFixed && isFixedCost && directActual === null && txStats.count === 0;
+      // A typed or auto-filled Actual is not backed by transactions: derive VAT/deductible from it
+      const derivedActual = directActual ?? (autoActual ? budget : null);
+      const actual = derivedActual !== null ? derivedActual : txStats.sum;
       const difference =
         group.kind === 'income' ? actual - budget : budget - actual;
 
@@ -146,14 +186,14 @@ export function computeMonthSummary(
       const catDedPct = cat.deductiblePct ?? (cat.mode === 'freelancer' ? 100 : 0);
 
       const deductibleActual =
-        directActual !== null
+        derivedActual !== null
           ? group.kind !== 'income'
             ? actual * (catDedPct / 100)
             : 0
           : txStats.deductible;
 
       const vatAmount =
-        directActual !== null
+        derivedActual !== null
           ? catTaxRate > 0
             ? actual - actual / (1 + catTaxRate / 100)
             : 0
@@ -170,6 +210,11 @@ export function computeMonthSummary(
         txCount: txStats.count,
         deductibleActual,
         vatAmount,
+        budgetFromSchedule,
+        budgetOverridesSchedule:
+          scheduledBudget !== undefined && (mb?.budgetManual ?? false),
+        isFixedCost,
+        autoActual,
       };
     });
 
@@ -321,6 +366,8 @@ export interface AccountComputedItem {
   txExpenseSum: number;
   txNetDelta: number;
   txCount: number;
+  /** Savings moved in from other accounts (savings categories whose target is this account) */
+  txTransferInSum: number;
 }
 
 export interface NetWorthHistoryPoint {
@@ -355,13 +402,26 @@ export interface NetWorthSummaryMetrics {
   historySeries: NetWorthHistoryPoint[];
 }
 
+/** categoryId → target account id, for savings categories that have one. */
+export function savingsTargetMap(categories: CategoryItem[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const c of categories) {
+    if (c.kind === 'savings' && c.targetAccountId) map.set(c.id, c.targetAccountId);
+  }
+  return map;
+}
+
 export function computeAccountLiveBalance(
   account: FinancialAccount,
-  transactions: TransactionItem[]
+  transactions: TransactionItem[],
+  savingsTargets: Map<string, string> = new Map()
 ): AccountComputedItem {
   let txIncomeSum = 0;
   let txExpenseSum = 0;
   let txCount = 0;
+  let txTransferInSum = 0;
+  // Manually valued accounts: only savings moved in after the last valuation are added
+  let pendingTransferIn = 0;
 
   for (const tx of transactions) {
     if (tx.accountId === account.id) {
@@ -371,17 +431,27 @@ export function computeAccountLiveBalance(
       } else {
         txExpenseSum += tx.amount;
       }
+    } else if (
+      tx.type === 'expense' &&
+      savingsTargets.get(tx.categoryId) === account.id
+    ) {
+      txCount++;
+      txTransferInSum += tx.amount;
+      if (tx.date > (account.updatedAt ?? '')) pendingTransferIn += tx.amount;
     }
   }
 
+  // A transfer in raises an asset and pays down a liability
+  const inflow = txIncomeSum + txTransferInSum;
   const txNetDelta =
     account.classification === 'liability'
-      ? txExpenseSum - txIncomeSum
-      : txIncomeSum - txExpenseSum;
+      ? txExpenseSum - inflow
+      : inflow - txExpenseSum;
 
   const liveBalance = account.autoTrackTransactions
     ? account.startingBalance + txNetDelta
-    : account.currentBalance;
+    : account.currentBalance +
+      (account.classification === 'liability' ? -pendingTransferIn : pendingTransferIn);
 
   return {
     account,
@@ -390,6 +460,7 @@ export function computeAccountLiveBalance(
     txExpenseSum,
     txNetDelta,
     txCount,
+    txTransferInSum,
   };
 }
 
@@ -402,9 +473,11 @@ export function computeNetWorthMetrics(
     workspace === 'combined' ? true : m === workspace;
 
   const rawAccounts = (state.accounts ?? []).filter((a) => filterMode(a.mode));
+  const savingsTargets = savingsTargetMap(state.categories ?? []);
   const accounts = rawAccounts.map((acc) =>
-    computeAccountLiveBalance(acc, state.transactions ?? [])
+    computeAccountLiveBalance(acc, state.transactions ?? [], savingsTargets)
   );
+  const accountById = new Map(rawAccounts.map((a) => [a.id, a]));
 
   let liquidAssets = 0;
   let retirementAssets = 0;
@@ -462,6 +535,8 @@ export function computeNetWorthMetrics(
   );
 
   let cumulativeCashflow = 0;
+  // Savings with a target account move money into that account's class instead of vanishing
+  const cumulativeTransfers = { liquid: 0, retirement: 0, investment: 0, fixed_asset: 0, liability: 0 };
   const historySeries: NetWorthHistoryPoint[] = SHORT_MONTHS.map((label, idx) => {
     const month = idx + 1;
     const mk = formatMonthKey(state.settings.activeYear, month);
@@ -485,21 +560,42 @@ export function computeNetWorthMetrics(
 
     const cf = annualCashflow[idx];
     cumulativeCashflow += cf ? cf.netActual : 0;
-    const projectedLiquid = Math.max(0, liquidAssets + cumulativeCashflow);
+    if (savingsTargets.size > 0) {
+      for (const gs of computeMonthSummary(state, mk, workspace).groups) {
+        if (gs.group.kind !== 'savings') continue;
+        for (const row of gs.rows) {
+          const target = accountById.get(savingsTargets.get(row.category.id) ?? '');
+          if (target && target.includeInNetWorth && row.actual !== 0) {
+            cumulativeTransfers[target.classification] += row.actual;
+          }
+        }
+      }
+    }
+    const projectedLiquid = Math.max(
+      0,
+      liquidAssets + cumulativeCashflow + cumulativeTransfers.liquid
+    );
+    const projectedRetirement = retirementAssets + cumulativeTransfers.retirement;
+    const projectedInvestment = investmentAssets + cumulativeTransfers.investment;
+    const projectedFixed = fixedAssets + cumulativeTransfers.fixed_asset;
+    const projectedLiabilities = Math.max(
+      0,
+      totalLiabilities - cumulativeTransfers.liability
+    );
     const projectedTotalAssets =
-      projectedLiquid + retirementAssets + investmentAssets + fixedAssets;
-    const projectedNetWorth = projectedTotalAssets - totalLiabilities;
+      projectedLiquid + projectedRetirement + projectedInvestment + projectedFixed;
+    const projectedNetWorth = projectedTotalAssets - projectedLiabilities;
 
     return {
       month,
       monthLabel: label,
       monthKey: mk,
       liquidAssets: projectedLiquid,
-      retirementAssets,
-      investmentAssets,
-      fixedAssets,
+      retirementAssets: projectedRetirement,
+      investmentAssets: projectedInvestment,
+      fixedAssets: projectedFixed,
       totalAssets: projectedTotalAssets,
-      totalLiabilities,
+      totalLiabilities: projectedLiabilities,
       netWorth: projectedNetWorth,
       hasExplicitSnapshot: false,
     };
@@ -522,6 +618,29 @@ export function computeNetWorthMetrics(
     liquidRunwayMonths,
     historySeries,
   };
+}
+
+/** Payments per year for a Yearly Planner schedule. */
+export function planPeriodsPerYear(schedule: YearlyPlanSchedule): number {
+  switch (schedule) {
+    case 'biweekly':
+      return 26;
+    case 'monthly':
+      return 12;
+    case 'bimonthly':
+      return 6;
+    case 'quarterly':
+      return 4;
+    case 'annual_lump':
+      return 1;
+    default:
+      return 12;
+  }
+}
+
+/** Yearly Planner schedule matching a recurring rule's frequency. */
+export function planScheduleForFrequency(frequency: RecurringFrequency): YearlyPlanSchedule {
+  return frequency === 'yearly' ? 'annual_lump' : frequency;
 }
 
 export function recurringMonthlyEquivalent(
@@ -596,6 +715,90 @@ function parseMonthIndex(monthKey: string): number | null {
   return year * 12 + (month - 1);
 }
 
+/** Current calendar month as YYYY-MM (local time). */
+export function currentMonthKey(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Parses YYYY-MM-DD as a UTC day number; null when invalid. */
+function parseIsoDay(dateStr: string | undefined): number | null {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const [y, m, d] = dateStr.split('-').map((p) => parseInt(p, 10));
+  const ms = Date.UTC(y, m - 1, d);
+  const check = new Date(ms);
+  if (check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) return null;
+  return Math.round(ms / 86400000);
+}
+
+function dayNumberToIso(dayNum: number): string {
+  return new Date(dayNum * 86400000).toISOString().slice(0, 10);
+}
+
+/**
+ * True when the rule has an explicit start (start week for bi-weekly, start
+ * month for bi-monthly / quarterly / yearly), so the amount due varies per month.
+ */
+export function isScheduledRule(r: RecurringRule): boolean {
+  if (r.frequency === 'biweekly') return parseIsoDay(r.startDate) !== null;
+  if (recurringMonthInterval(r.frequency) > 1) {
+    return r.startMonth !== undefined && parseMonthIndex(r.startMonth) !== null;
+  }
+  return false;
+}
+
+/**
+ * Dates (YYYY-MM-DD) on which the rule falls due inside `monthKey`.
+ * Returns null when it cannot be known (legacy bi-monthly / quarterly / yearly
+ * rule without a start month).
+ */
+export function getRecurringOccurrenceDates(
+  r: RecurringRule,
+  monthKey: string
+): string[] | null {
+  const targetIdx = parseMonthIndex(monthKey);
+  if (targetIdx === null) return null;
+
+  if (r.frequency === 'biweekly') {
+    const start = parseIsoDay(r.startDate);
+    if (start === null) {
+      return getRecurringDaysInMonth('biweekly', r.dayOfMonth).map(
+        (d) => `${monthKey}-${String(d).padStart(2, '0')}`
+      );
+    }
+    const year = Math.floor(targetIdx / 12);
+    const month = targetIdx % 12;
+    const first = Math.round(Date.UTC(year, month, 1) / 86400000);
+    const last = Math.round(Date.UTC(year, month + 1, 0) / 86400000);
+    if (last < start) return [];
+    const offset = Math.max(0, first - start);
+    const out: string[] = [];
+    for (let day = start + Math.ceil(offset / 14) * 14; day <= last; day += 14) {
+      out.push(dayNumberToIso(day));
+    }
+    return out;
+  }
+
+  const dayStr = String(
+    getRecurringDaysInMonth(r.frequency, r.dayOfMonth)[0]
+  ).padStart(2, '0');
+  const interval = recurringMonthInterval(r.frequency);
+  if (interval === 1) return [`${monthKey}-${dayStr}`];
+
+  const startIdx = r.startMonth ? parseMonthIndex(r.startMonth) : null;
+  if (startIdx === null) return null;
+  const diff = targetIdx - startIdx;
+  return diff >= 0 && diff % interval === 0 ? [`${monthKey}-${dayStr}`] : [];
+}
+
+/** Total amount the rule falls due in `monthKey`, or null when unknown. */
+export function recurringAmountForMonth(
+  r: RecurringRule,
+  monthKey: string
+): number | null {
+  const dates = getRecurringOccurrenceDates(r, monthKey);
+  return dates === null ? null : dates.length * r.amount;
+}
+
 export function buildRecurringTransactionsForMonth(
   rules: RecurringRule[],
   existingTransactions: TransactionItem[],
@@ -617,7 +820,8 @@ export function buildRecurringTransactionsForMonth(
 
   for (const r of activeRules) {
     const interval = recurringMonthInterval(r.frequency);
-    if (interval > 1) {
+    const scheduled = isScheduledRule(r);
+    if (interval > 1 && !scheduled) {
       const blockedByIntervalOrSameMonth = existingTransactions.some((tx) => {
         if (tx.recurringId === r.id && targetIdx !== null) {
           const txIdx = parseMonthIndex(tx.monthKey);
@@ -636,10 +840,13 @@ export function buildRecurringTransactionsForMonth(
       if (blockedByIntervalOrSameMonth) continue;
     }
 
-    const days = getRecurringDaysInMonth(r.frequency, r.dayOfMonth);
-    for (const day of days) {
-      const dayStr = String(day).padStart(2, '0');
-      const dateStr = `${monthKey}-${dayStr}`;
+    const dates = scheduled
+      ? getRecurringOccurrenceDates(r, monthKey) ?? []
+      : getRecurringDaysInMonth(r.frequency, r.dayOfMonth).map(
+          (day) => `${monthKey}-${String(day).padStart(2, '0')}`
+        );
+    for (const dateStr of dates) {
+      const dayStr = dateStr.slice(8, 10);
 
       const alreadyExists =
         r.frequency === 'biweekly'
@@ -688,4 +895,46 @@ export function buildRecurringTransactionsForMonth(
   }
 
   return { activeCount: activeRules.length, newTransactions };
+}
+
+/** ISO week string (YYYY-Www) containing the given YYYY-MM-DD date. */
+export function isoWeekOfDate(dateStr: string): string | null {
+  const dayNum = parseIsoDay(dateStr);
+  if (dayNum === null) return null;
+  const d = new Date(dayNum * 86400000);
+  const weekday = (d.getUTCDay() + 6) % 7; // Mon = 0
+  // Thursday of this week decides the ISO year
+  const thursday = new Date((dayNum - weekday + 3) * 86400000);
+  const isoYear = thursday.getUTCFullYear();
+  const jan4 = Date.UTC(isoYear, 0, 4);
+  const jan4Weekday = (new Date(jan4).getUTCDay() + 6) % 7;
+  const week1Monday = Math.round(jan4 / 86400000) - jan4Weekday;
+  const week = Math.floor((dayNum - weekday - week1Monday) / 7) + 1;
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+/** Weekday of a YYYY-MM-DD date, Monday = 0 … Sunday = 6. */
+export function isoWeekdayOfDate(dateStr: string): number | null {
+  const dayNum = parseIsoDay(dateStr);
+  if (dayNum === null) return null;
+  return (new Date(dayNum * 86400000).getUTCDay() + 6) % 7;
+}
+
+/** Date (YYYY-MM-DD) of `weekday` (Mon = 0) in ISO week `week` (YYYY-Www). */
+export function dateInIsoWeek(week: string, weekday: number): string | null {
+  const m = /^(\d{4})-W(\d{2})$/.exec(week);
+  if (!m) return null;
+  const year = parseInt(m[1], 10);
+  const wk = parseInt(m[2], 10);
+  if (wk < 1 || wk > 53) return null;
+  const jan4 = Date.UTC(year, 0, 4);
+  const jan4Weekday = (new Date(jan4).getUTCDay() + 6) % 7;
+  const week1Monday = Math.round(jan4 / 86400000) - jan4Weekday;
+  const wd = Math.min(6, Math.max(0, Math.round(weekday)));
+  return dayNumberToIso(week1Monday + (wk - 1) * 7 + wd);
+}
+
+/** Today as YYYY-MM-DD (local time). */
+export function todayIso(now: Date = new Date()): string {
+  return `${currentMonthKey(now)}-${String(now.getDate()).padStart(2, '0')}`;
 }
