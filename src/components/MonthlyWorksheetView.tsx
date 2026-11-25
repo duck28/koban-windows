@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -10,10 +10,14 @@ import {
   RotateCcw,
   Repeat,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   AlertTriangle,
   X,
   Anchor,
   CalendarClock,
+  GripVertical,
 } from 'lucide-react';
 import {
   ActiveWorkspace,
@@ -22,6 +26,9 @@ import {
   FinancialAccount,
   LedgerMode,
   MonthCopyScope,
+  WorksheetColumnWidths,
+  WorksheetSortDirection,
+  WorksheetSortField,
 } from '../types';
 import {
   CategoryComputedRow,
@@ -29,10 +36,21 @@ import {
   formatNumber,
   GroupComputedSummary,
   MonthSummaryMetrics,
+  sortWorksheetRows,
 } from '../utils/calculations';
 import { formatMonthKey } from '../data/templates';
 import { useI18n } from '../i18n';
 import { KobanSelect } from './KobanSelect';
+
+const DEFAULT_COL_WIDTHS: Required<WorksheetColumnWidths> = {
+  budget: 86,
+  actual: 86,
+  diff: 78,
+  leftPanePct: 50,
+};
+const ACTIONS_COL_WIDTH = 52;
+const MIN_LABEL_COL_WIDTH = 170;
+type ResizableColKey = 'budget' | 'actual' | 'diff';
 
 interface MonthlyWorksheetViewProps {
   summary: MonthSummaryMetrics;
@@ -48,6 +66,18 @@ interface MonthlyWorksheetViewProps {
   onToggleCategoryFixed: (categoryId: string) => void;
   /** For the savings target-account badge */
   accounts: FinancialAccount[];
+  onUpdateCategoryTargetAccount?: (
+    categoryId: string,
+    targetAccountId: string | undefined
+  ) => void;
+  onReorderCategory?: (opts: {
+    draggedCategoryId: string;
+    targetGroupId: string;
+    targetCategoryId: string | null;
+    position: 'before' | 'after';
+    baseOrderIds?: string[];
+  }) => void;
+  onUpdateSettings?: (patch: Partial<AppSettings>) => void;
   onDeleteCategory: (categoryId: string) => void;
   onAddCategory: (
     groupId: string,
@@ -88,6 +118,9 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
   onToggleCategoryRecurring,
   onToggleCategoryFixed,
   accounts,
+  onUpdateCategoryTargetAccount,
+  onReorderCategory,
+  onUpdateSettings,
   onDeleteCategory,
   onAddCategory,
   onAddGroup,
@@ -111,6 +144,189 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
   const [newGroupMode, setNewGroupMode] = useState<LedgerMode>(
     workspace === 'freelancer' ? 'freelancer' : 'home'
   );
+
+  // Adjustable column widths & desktop split ratio
+  const [colWidths, setColWidths] = useState<Required<WorksheetColumnWidths>>(() => ({
+    budget: settings.worksheetColumnWidths?.budget ?? DEFAULT_COL_WIDTHS.budget,
+    actual: settings.worksheetColumnWidths?.actual ?? DEFAULT_COL_WIDTHS.actual,
+    diff: settings.worksheetColumnWidths?.diff ?? DEFAULT_COL_WIDTHS.diff,
+    leftPanePct: settings.worksheetColumnWidths?.leftPanePct ?? DEFAULT_COL_WIDTHS.leftPanePct,
+  }));
+  const colWidthsRef = useRef(colWidths);
+  colWidthsRef.current = colWidths;
+
+  useEffect(() => {
+    const w = settings.worksheetColumnWidths;
+    if (!w) return;
+    setColWidths({
+      budget: w.budget ?? DEFAULT_COL_WIDTHS.budget,
+      actual: w.actual ?? DEFAULT_COL_WIDTHS.actual,
+      diff: w.diff ?? DEFAULT_COL_WIDTHS.diff,
+      leftPanePct: w.leftPanePct ?? DEFAULT_COL_WIDTHS.leftPanePct,
+    });
+  }, [settings.worksheetColumnWidths]);
+
+  const [resizingCol, setResizingCol] = useState<ResizableColKey | null>(null);
+  const [resizingSplit, setResizingSplit] = useState(false);
+
+  // Responsive container measurement for two-column split vs. single column
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window !== 'undefined' && window.innerWidth >= 1024 ? 1024 : 720
+  );
+
+  useEffect(() => {
+    const el = splitContainerRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Sorting state
+  const sortBy: WorksheetSortField = settings.worksheetSortBy ?? 'manual';
+  const sortDir: WorksheetSortDirection = settings.worksheetSortDir ?? 'asc';
+
+  const cycleColumnSort = (field: 'name' | 'budget' | 'actual' | 'diff') => {
+    const defaultDir: WorksheetSortDirection = field === 'name' ? 'asc' : 'desc';
+    if (sortBy !== field) {
+      onUpdateSettings?.({ worksheetSortBy: field, worksheetSortDir: defaultDir });
+    } else if (sortDir === defaultDir) {
+      onUpdateSettings?.({
+        worksheetSortBy: field,
+        worksheetSortDir: defaultDir === 'asc' ? 'desc' : 'asc',
+      });
+    } else {
+      onUpdateSettings?.({ worksheetSortBy: 'manual', worksheetSortDir: 'asc' });
+    }
+  };
+
+  // Drag-and-drop category reordering
+  const [draggedCatId, setDraggedCatId] = useState<string | null>(null);
+  const draggedCatIdRef = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    groupId: string;
+    categoryId: string | null;
+    position: 'before' | 'after';
+  } | null>(null);
+
+  const clearDragState = () => {
+    draggedCatIdRef.current = null;
+    setDraggedCatId(null);
+    setDropTarget(null);
+  };
+
+  const hasCustomWidths =
+    colWidths.budget !== DEFAULT_COL_WIDTHS.budget ||
+    colWidths.actual !== DEFAULT_COL_WIDTHS.actual ||
+    colWidths.diff !== DEFAULT_COL_WIDTHS.diff ||
+    colWidths.leftPanePct !== DEFAULT_COL_WIDTHS.leftPanePct;
+
+  const resetAllWidths = () => {
+    const next = { ...DEFAULT_COL_WIDTHS };
+    colWidthsRef.current = next;
+    setColWidths(next);
+    onUpdateSettings?.({ worksheetColumnWidths: next });
+  };
+
+  const resetNumericColWidths = () => {
+    const next = {
+      ...colWidthsRef.current,
+      budget: DEFAULT_COL_WIDTHS.budget,
+      actual: DEFAULT_COL_WIDTHS.actual,
+      diff: DEFAULT_COL_WIDTHS.diff,
+    };
+    colWidthsRef.current = next;
+    setColWidths(next);
+    onUpdateSettings?.({ worksheetColumnWidths: next });
+  };
+
+  const startColResize = (
+    col: ResizableColKey,
+    e: React.PointerEvent<HTMLDivElement>
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = colWidthsRef.current[col];
+    const minW = col === 'diff' ? 60 : 64;
+    const maxW = 180;
+    setResizingCol(col);
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const nextVal = Math.max(minW, Math.min(maxW, Math.round(startWidth - dx)));
+      const next = { ...colWidthsRef.current, [col]: nextVal };
+      colWidthsRef.current = next;
+      setColWidths(next);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setResizingCol(null);
+      onUpdateSettings?.({ worksheetColumnWidths: colWidthsRef.current });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const startSplitResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = splitContainerRef.current;
+    if (!el) return;
+    const totalAvail = Math.max(300, el.clientWidth - 12);
+    const startX = e.clientX;
+    const startPct = colWidthsRef.current.leftPanePct ?? 50;
+    const startLeftPx = (startPct / 100) * totalAvail;
+    setResizingSplit(true);
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const nextPct = Math.max(
+        34,
+        Math.min(66, Math.round(((startLeftPx + dx) / totalAvail) * 100))
+      );
+      const next = { ...colWidthsRef.current, leftPanePct: nextPct };
+      colWidthsRef.current = next;
+      setColWidths(next);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setResizingSplit(false);
+      onUpdateSettings?.({ worksheetColumnWidths: colWidthsRef.current });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const rowGridStyle: React.CSSProperties = {
+    gridTemplateColumns: `minmax(${MIN_LABEL_COL_WIDTH}px, 1fr) ${colWidths.budget}px ${colWidths.actual}px ${colWidths.diff}px ${ACTIONS_COL_WIDTH}px`,
+  };
+  const summaryGridStyle: React.CSSProperties = {
+    gridTemplateColumns: `minmax(${MIN_LABEL_COL_WIDTH}px, 1fr) ${colWidths.budget}px ${colWidths.actual}px ${colWidths.diff}px`,
+  };
+  const rowMinTableWidth =
+    MIN_LABEL_COL_WIDTH +
+    colWidths.budget +
+    colWidths.actual +
+    colWidths.diff +
+    ACTIONS_COL_WIDTH +
+    36;
+  const summaryMinTableWidth =
+    MIN_LABEL_COL_WIDTH + colWidths.budget + colWidths.actual + colWidths.diff + 44;
+  const isTwoColumn = containerWidth >= 900;
 
   // Month Copy Confirmation Modal State
   const [copyModalState, setCopyModalState] = useState<{
@@ -242,7 +458,10 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
     setShowNewGroupForm(false);
   };
 
-  const renderCategoryRow = (row: CategoryComputedRow) => {
+  const renderCategoryRow = (
+    row: CategoryComputedRow,
+    sortedRowIds: string[]
+  ) => {
     if (
       hideZeroRows &&
       row.budget === 0 &&
@@ -255,28 +474,117 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
     const isPositiveDiff = row.difference > 0.004;
     const isNegativeDiff = row.difference < -0.004;
     const displayCategoryName = tCategoryName(row.category);
+    const isDragged = draggedCatId === row.category.id;
+    const isDropTarget =
+      dropTarget?.groupId === row.group.id &&
+      dropTarget.categoryId === row.category.id &&
+      draggedCatId !== row.category.id;
+    const isDropBefore = isDropTarget && dropTarget?.position === 'before';
+    const isDropAfter = isDropTarget && dropTarget?.position === 'after';
 
     return (
       <div
         key={row.category.id}
-        className="group grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-1.5 border-b border-line/60 last:border-b-0 hover:bg-raised/60 transition-colors text-[12px]"
+        style={rowGridStyle}
+        onMouseDown={(e) => {
+          const el = e.target as HTMLElement;
+          if (el.closest('[data-drag-handle]')) {
+            e.currentTarget.draggable = Boolean(onReorderCategory);
+            return;
+          }
+          const isInteractive = Boolean(
+            el.closest('input, select, button, option, [data-no-drag]')
+          );
+          e.currentTarget.draggable = Boolean(onReorderCategory) && !isInteractive;
+        }}
+        onDragStart={(e) => {
+          if (!onReorderCategory) {
+            e.preventDefault();
+            return;
+          }
+          e.dataTransfer.setData('text/plain', row.category.id);
+          e.dataTransfer.effectAllowed = 'move';
+          draggedCatIdRef.current = row.category.id;
+          setDraggedCatId(row.category.id);
+        }}
+        onDragOver={(e) => {
+          const activeId = draggedCatIdRef.current;
+          if (!activeId || activeId === row.category.id || !onReorderCategory) {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = e.currentTarget.getBoundingClientRect();
+          const position: 'before' | 'after' =
+            e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+          setDropTarget((prev) =>
+            prev?.groupId === row.group.id &&
+            prev.categoryId === row.category.id &&
+            prev.position === position
+              ? prev
+              : { groupId: row.group.id, categoryId: row.category.id, position }
+          );
+        }}
+        onDrop={(e) => {
+          const activeId =
+            draggedCatIdRef.current || e.dataTransfer.getData('text/plain');
+          if (!activeId || activeId === row.category.id || !onReorderCategory) {
+            clearDragState();
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const position: 'before' | 'after' =
+            e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+          onReorderCategory({
+            draggedCategoryId: activeId,
+            targetGroupId: row.group.id,
+            targetCategoryId: row.category.id,
+            position,
+            baseOrderIds: sortedRowIds,
+          });
+          clearDragState();
+        }}
+        onDragEnd={clearDragState}
+        className={`group grid items-center gap-1 px-2.5 py-1.5 border-b border-line/60 last:border-b-0 hover:bg-raised/60 transition-colors text-[12px] ${
+          isDragged ? 'opacity-45 bg-raised/70' : ''
+        } ${isDropBefore ? '!border-t-2 !border-t-indigo' : ''} ${
+          isDropAfter ? '!border-b-2 !border-b-indigo' : ''
+        }`}
       >
-        {/* Category Name + badges, then the row icons in fixed slots so they line up across rows */}
-        <div className="flex items-center gap-1.5 min-w-0 pr-1">
+        {/* Category Name + badges & icons (strictly single-line; truncates cleanly without wrapping or overlapping) */}
+        <div className="flex items-center gap-1 min-w-0 overflow-hidden pr-0.5">
+          {onReorderCategory && (
+            <span
+              data-drag-handle
+              className="w-4 h-6 inline-flex items-center justify-center text-ink-3/55 group-hover:text-ink-2 cursor-grab active:cursor-grabbing shrink-0 select-none"
+              title={t('worksheet.dragRowTip')}
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </span>
+          )}
           <input
             type="text"
+            size={1}
             value={displayCategoryName}
             onChange={(e) => onRenameCategory(row.category.id, e.target.value)}
-            className="flex-1 min-w-0 bg-transparent text-ink truncate focus:outline-none focus:bg-surface focus:px-1.5 rounded"
+            className="flex-1 basis-0 min-w-[48px] bg-transparent text-ink truncate focus:outline-none focus:bg-surface focus:px-1.5 rounded"
             title={displayCategoryName}
           />
 
-          {/* Variable-width badges (left of the icon slots, so they never shift the icons) */}
           {row.group.kind === 'savings' && (() => {
             const target = accounts.find((a) => a.id === row.category.targetAccountId);
+            const eligibleAccounts = accounts.filter(
+              (a) =>
+                a.id === row.category.targetAccountId ||
+                (a.mode === row.category.mode && a.classification !== 'liability')
+            );
             return (
               <span
-                className={`inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] shrink min-w-0 max-w-[110px] ${
+                data-no-drag
+                className={`relative overflow-hidden inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] shrink min-w-[28px] max-w-[112px] ${
                   target ? 'bg-indigo/10 text-indigo' : 'bg-accent/10 text-accent'
                 }`}
                 title={
@@ -285,8 +593,30 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                     : t('worksheet.savingsNoTargetTip')
                 }
               >
-                <ArrowRight className="w-3 h-3 shrink-0" />
+                <ArrowRight className="w-2.5 h-2.5 shrink-0" />
                 <span className="truncate">{target ? tAccountName(target) : '?'}</span>
+                {onUpdateCategoryTargetAccount && (
+                  <select
+                    value={row.category.targetAccountId ?? ''}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onChange={(e) =>
+                      onUpdateCategoryTargetAccount(
+                        row.category.id,
+                        e.target.value || undefined
+                      )
+                    }
+                    aria-label={t('categories.targetAccountPick')}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  >
+                    <option value="">?</option>
+                    {eligibleAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {tAccountName(a)}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </span>
             );
           })()}
@@ -294,14 +624,14 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
             <button
               type="button"
               onClick={() => onResetScheduledBudget(row.category.id)}
-              className="w-6 h-6 inline-flex items-center justify-center rounded border border-transparent text-indigo/80 hover:text-indigo hover:bg-surface hover:border-line transition-colors cursor-pointer"
+              className="w-5 h-5 inline-flex items-center justify-center rounded border border-transparent text-indigo/80 hover:text-indigo hover:bg-surface hover:border-line transition-colors cursor-pointer shrink-0"
               title={t('worksheet.manualBudgetTip')}
             >
               <CalendarClock className="w-3.5 h-3.5" />
             </button>
           ) : row.budgetFromSchedule ? (
             <span
-              className="w-6 h-6 inline-flex items-center justify-center text-indigo/80"
+              className="w-5 h-5 inline-flex items-center justify-center text-indigo/80 shrink-0"
               title={t('worksheet.scheduledBudgetTip')}
             >
               <CalendarClock className="w-3.5 h-3.5" />
@@ -309,7 +639,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
           ) : null}
           {row.txCount > 0 && row.directActual === null && (
             <span
-              className="px-1.5 py-0.2 rounded text-[10px] bg-raised text-ink-2 border border-line/70 tabular-nums shrink-0"
+              className="px-1 py-0.2 rounded text-[10px] bg-raised text-ink-2 border border-line/70 tabular-nums shrink-0"
               title={tf('worksheet.txCountTip', { count: row.txCount })}
             >
               {tf('worksheet.txCountSuffix', { count: row.txCount })}
@@ -327,13 +657,13 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
               </span>
             )}
 
-          {/* Fixed icon slots: recurring · fixed cost · reset Actual (empty slot when absent) */}
+          {/* Compact icon slots: recurring · fixed cost · reset Actual (omit spacer when absent) */}
           <div className="flex items-center gap-0.5 shrink-0">
             <button
               type="button"
               onClick={() => onToggleCategoryRecurring(row.category.id)}
               aria-pressed={Boolean(row.category.isRecurring)}
-              className={`w-6 h-6 inline-flex items-center justify-center rounded transition-colors cursor-pointer ${
+              className={`w-5 h-5 inline-flex items-center justify-center rounded transition-colors cursor-pointer ${
                 row.category.isRecurring
                   ? 'bg-indigo/18 text-indigo border border-indigo/40 hover:bg-indigo/25'
                   : 'text-ink-2/80 border border-transparent hover:text-indigo hover:bg-indigo/12 hover:border-indigo/30'
@@ -344,14 +674,14 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                   : t('worksheet.recurringEnableTip')
               }
             >
-              <Repeat className="w-3.5 h-3.5" />
+              <Repeat className="w-3 h-3" />
             </button>
             {row.group.kind !== 'income' ? (
               <button
                 type="button"
                 onClick={() => onToggleCategoryFixed(row.category.id)}
                 aria-pressed={row.isFixedCost}
-                className={`w-6 h-6 inline-flex items-center justify-center rounded transition-colors cursor-pointer ${
+                className={`w-5 h-5 inline-flex items-center justify-center rounded transition-colors cursor-pointer ${
                   row.isFixedCost
                     ? 'bg-indigo/18 text-indigo border border-indigo/40 hover:bg-indigo/25'
                     : 'text-ink-2/80 border border-transparent hover:text-indigo hover:bg-indigo/12 hover:border-indigo/30'
@@ -362,28 +692,26 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
                     : t('worksheet.fixedCostEnableTip')
                 }
               >
-                <Anchor className="w-3.5 h-3.5" />
+                <Anchor className="w-3 h-3" />
               </button>
             ) : (
-              <span className="w-6 h-6" aria-hidden="true" />
+              <span className="w-5 h-5" aria-hidden="true" />
             )}
-            {row.directActual !== null ? (
+            {row.directActual !== null && (
               <button
                 type="button"
                 onClick={() => onUpdateDirectActual(row.category.id, null)}
-                className="w-6 h-6 inline-flex items-center justify-center rounded border border-transparent text-ink-2/85 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
+                className="w-5 h-5 inline-flex items-center justify-center rounded border border-transparent text-ink-2/85 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
                 title={t('worksheet.manualActualTip')}
               >
-                <RotateCcw className="w-3.5 h-3.5" />
+                <RotateCcw className="w-3 h-3" />
               </button>
-            ) : (
-              <span className="w-6 h-6" aria-hidden="true" />
             )}
           </div>
         </div>
 
         {/* Budget Input */}
-        <div className="relative">
+        <div className="relative min-w-0">
           <input
             type="number"
             step="0.05"
@@ -398,7 +726,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         </div>
 
         {/* Actual Input (Inline Excel-like editing OR auto-summed from transactions) */}
-        <div className="relative">
+        <div className="relative min-w-0">
           <input
             type="number"
             step="0.05"
@@ -417,7 +745,7 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
 
         {/* Difference */}
         <div
-          className={`text-right tabular-nums pr-1 font-medium ${
+          className={`text-right tabular-nums pr-1 font-medium truncate ${
             isPositiveDiff
               ? 'text-positive'
               : isNegativeDiff
@@ -452,125 +780,300 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
     );
   };
 
+  const renderResizableColumnHeader = (
+    label: string,
+    field: ResizableColKey,
+    extraClass = ''
+  ) => {
+    const isActive = sortBy === field;
+    return (
+      <div className={`relative flex items-center justify-end min-w-0 select-none ${extraClass}`}>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          onPointerDown={(e) => startColResize(field, e)}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            resetNumericColWidths();
+          }}
+          title={t('worksheet.resizeColTip')}
+          className="absolute -left-1.5 top-[-6px] bottom-[-6px] w-2.5 cursor-col-resize z-10 flex items-center justify-center group/resize"
+        >
+          <span
+            className={`w-[2px] h-3.5 rounded-full transition-colors ${
+              resizingCol === field
+                ? 'bg-indigo'
+                : 'bg-line/70 group-hover/resize:bg-indigo'
+            }`}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => cycleColumnSort(field)}
+          className={`inline-flex items-center justify-end gap-0.5 max-w-full truncate hover:text-ink transition-colors cursor-pointer ${
+            isActive ? 'text-ink font-semibold' : 'text-ink-2 font-normal'
+          }`}
+          title={tf('worksheet.sortLabel') + ': ' + label}
+        >
+          <span className="truncate">{label}</span>
+          {isActive &&
+            (sortDir === 'asc' ? (
+              <ArrowUp className="w-3 h-3 shrink-0 text-indigo" />
+            ) : (
+              <ArrowDown className="w-3 h-3 shrink-0 text-indigo" />
+            ))}
+        </button>
+      </div>
+    );
+  };
+
   const renderGroupBlock = (gs: GroupComputedSummary) => {
     const isPositiveDiff = gs.totalDifference > 0.004;
     const isNegativeDiff = gs.totalDifference < -0.004;
     const isAdding = addingToGroupId === gs.group.id;
     const displayGroupName = tGroupName(gs.group);
+    const sortedRows = sortWorksheetRows(gs.rows, sortBy, sortDir, tCategoryName);
+    const sortedRowIds = sortedRows.map((r) => r.category.id);
+    const isGroupEndDropHover =
+      draggedCatId !== null &&
+      dropTarget?.groupId === gs.group.id &&
+      dropTarget.categoryId === null;
 
     return (
       <section
         key={gs.group.id}
-        className="bg-surface border border-line rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+        className={`bg-surface border rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors ${
+          isGroupEndDropHover ? 'border-indigo ring-1 ring-indigo/50' : 'border-line'
+        }`}
       >
-        {/* Group Header */}
-        <div className="grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-2.5 bg-raised/70 border-b border-line text-[11px] font-semibold tracking-wide">
-          <div className="flex items-center gap-2 min-w-0">
-            <span
-              className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: gs.group.color }}
-            />
-            <span className="text-ink truncate uppercase tracking-[0.08em]">
-              {displayGroupName}
-            </span>
-            {workspace === 'combined' && (
-              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-surface text-ink-2 border border-line/70 font-normal">
-                {t(`workspace.${gs.group.mode}`)}
-              </span>
+        <div className="overflow-x-auto">
+          <div className="w-full" style={{ minWidth: `${rowMinTableWidth}px` }}>
+            {/* Group Header */}
+            <div
+              style={rowGridStyle}
+              onDragOver={(e) => {
+                if (!draggedCatIdRef.current || !onReorderCategory) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const firstId = sortedRowIds[0] ?? null;
+                setDropTarget((prev) =>
+                  prev?.groupId === gs.group.id &&
+                  prev.categoryId === firstId &&
+                  prev.position === 'before'
+                    ? prev
+                    : { groupId: gs.group.id, categoryId: firstId, position: 'before' }
+                );
+              }}
+              onDrop={(e) => {
+                const activeId =
+                  draggedCatIdRef.current || e.dataTransfer.getData('text/plain');
+                if (!activeId || !onReorderCategory) {
+                  clearDragState();
+                  return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                onReorderCategory({
+                  draggedCategoryId: activeId,
+                  targetGroupId: gs.group.id,
+                  targetCategoryId: sortedRowIds[0] ?? null,
+                  position: 'before',
+                  baseOrderIds: sortedRowIds,
+                });
+                clearDragState();
+              }}
+              className="grid items-center gap-1 px-2.5 py-2.5 bg-raised/70 border-b border-line text-[11px] font-semibold tracking-wide"
+            >
+              <div className="flex items-center justify-between gap-1.5 min-w-0 pr-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: gs.group.color }}
+                  />
+                  <span className="text-ink truncate uppercase tracking-[0.08em]">
+                    {displayGroupName}
+                  </span>
+                  {workspace === 'combined' && (
+                    <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-surface text-ink-2 border border-line/70 font-normal shrink-0">
+                      {t(`workspace.${gs.group.mode}`)}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => cycleColumnSort('name')}
+                  className={`px-1 py-0.5 rounded inline-flex items-center gap-0.5 text-[10px] shrink-0 transition-colors cursor-pointer ${
+                    sortBy === 'name'
+                      ? 'bg-surface border border-line text-ink font-semibold'
+                      : 'text-ink-3 hover:text-ink hover:bg-surface/70 font-normal'
+                  }`}
+                  title={`${t('worksheet.sortLabel')}: ${t('worksheet.sortName')}`}
+                >
+                  <span>A–Z</span>
+                  {sortBy === 'name' &&
+                    (sortDir === 'asc' ? (
+                      <ArrowUp className="w-2.5 h-2.5 text-indigo" />
+                    ) : (
+                      <ArrowDown className="w-2.5 h-2.5 text-indigo" />
+                    ))}
+                </button>
+              </div>
+              {renderResizableColumnHeader(t('finance.budget'), 'budget')}
+              {renderResizableColumnHeader(t('finance.actual'), 'actual')}
+              {renderResizableColumnHeader(t('worksheet.diffShort'), 'diff', 'pr-1')}
+              <div className="flex items-center justify-end gap-0.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAddingToGroupId(isAdding ? null : gs.group.id)
+                  }
+                  className="p-1 rounded border border-transparent text-ink-2 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
+                  title={t('worksheet.addCategoryTip')}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteGroup(gs.group.id)}
+                  className="p-1 rounded border border-transparent text-ink-2 hover:text-accent hover:bg-accent/12 hover:border-accent/30 transition-colors cursor-pointer"
+                  title={t('worksheet.deleteGroupTip')}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Category Rows */}
+            <div
+              onDragOver={(e) => {
+                if (!draggedCatIdRef.current || !onReorderCategory) return;
+                if (sortedRows.length > 0) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDropTarget({
+                  groupId: gs.group.id,
+                  categoryId: null,
+                  position: 'after',
+                });
+              }}
+              onDrop={(e) => {
+                const activeId =
+                  draggedCatIdRef.current || e.dataTransfer.getData('text/plain');
+                if (!activeId || !onReorderCategory) {
+                  clearDragState();
+                  return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                onReorderCategory({
+                  draggedCategoryId: activeId,
+                  targetGroupId: gs.group.id,
+                  targetCategoryId: null,
+                  position: 'after',
+                  baseOrderIds: sortedRowIds,
+                });
+                clearDragState();
+              }}
+              className="divide-y divide-line/50 min-h-[4px]"
+            >
+              {sortedRows.map((row) => renderCategoryRow(row, sortedRowIds))}
+            </div>
+
+            {/* Inline Add Category Form */}
+            {isAdding && (
+              <form
+                onSubmit={(e) =>
+                  handleCreateCategory(e, gs.group.id, gs.group.mode, gs.group.kind)
+                }
+                className="flex items-center gap-2 px-3 py-2 bg-app border-t border-line"
+              >
+                <input
+                  type="text"
+                  placeholder={t('worksheet.newCategoryPlaceholder')}
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  autoFocus
+                  className="flex-1 h-7 px-2 rounded bg-surface border border-line text-xs text-ink focus:outline-none"
+                />
+                <input
+                  type="number"
+                  step="0.05"
+                  placeholder={t('worksheet.budgetZeroPlaceholder')}
+                  value={newCatBudget}
+                  onChange={(e) => setNewCatBudget(e.target.value)}
+                  className="w-24 h-7 px-2 rounded bg-surface border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  className="h-7 px-2.5 rounded bg-ink text-on-ink text-xs cursor-pointer"
+                >
+                  {t('common.add')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddingToGroupId(null)}
+                  className="h-7 px-2 rounded text-xs text-ink-2 hover:bg-raised cursor-pointer"
+                >
+                  {t('common.cancel')}
+                </button>
+              </form>
             )}
+
+            {/* Group Total Footer (Matches Excel "Total HOME EXPENSES", etc.) */}
+            <div
+              style={rowGridStyle}
+              onDragOver={(e) => {
+                if (!draggedCatIdRef.current || !onReorderCategory) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDropTarget({
+                  groupId: gs.group.id,
+                  categoryId: null,
+                  position: 'after',
+                });
+              }}
+              onDrop={(e) => {
+                const activeId =
+                  draggedCatIdRef.current || e.dataTransfer.getData('text/plain');
+                if (!activeId || !onReorderCategory) {
+                  clearDragState();
+                  return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                onReorderCategory({
+                  draggedCategoryId: activeId,
+                  targetGroupId: gs.group.id,
+                  targetCategoryId: null,
+                  position: 'after',
+                  baseOrderIds: sortedRowIds,
+                });
+                clearDragState();
+              }}
+              className="grid items-center gap-1 px-2.5 py-2 bg-app/80 border-t border-line text-[12px] font-semibold"
+            >
+              <span className="text-ink truncate">{tf('worksheet.totalGroup', { group: displayGroupName })}</span>
+              <span className="text-right tabular-nums text-ink-2 px-1.5 truncate">
+                {formatNumber(gs.totalBudget)}
+              </span>
+              <span className="text-right tabular-nums text-ink px-1.5 truncate">
+                {formatNumber(gs.totalActual)}
+              </span>
+              <span
+                className={`text-right tabular-nums pr-1 truncate ${
+                  isPositiveDiff
+                    ? 'text-positive'
+                    : isNegativeDiff
+                      ? 'text-accent'
+                      : 'text-ink-3'
+                }`}
+              >
+                {isPositiveDiff ? '+' : ''}
+                {formatNumber(gs.totalDifference)}
+              </span>
+              <span />
+            </div>
           </div>
-          <span className="text-right text-ink-2 font-normal">{t('finance.budget')}</span>
-          <span className="text-right text-ink-2 font-normal">{t('finance.actual')}</span>
-          <span className="text-right text-ink-2 font-normal pr-1">{t('worksheet.diffShort')}</span>
-          <div className="flex items-center justify-end gap-0.5">
-            <button
-              type="button"
-              onClick={() =>
-                setAddingToGroupId(isAdding ? null : gs.group.id)
-              }
-              className="p-1 rounded border border-transparent text-ink-2 hover:text-ink hover:bg-surface hover:border-line transition-colors cursor-pointer"
-              title={t('worksheet.addCategoryTip')}
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onDeleteGroup(gs.group.id)}
-              className="p-1 rounded border border-transparent text-ink-2 hover:text-accent hover:bg-accent/12 hover:border-accent/30 transition-colors cursor-pointer"
-              title={t('worksheet.deleteGroupTip')}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Category Rows */}
-        <div className="divide-y divide-line/50">
-          {gs.rows.map(renderCategoryRow)}
-        </div>
-
-        {/* Inline Add Category Form */}
-        {isAdding && (
-          <form
-            onSubmit={(e) =>
-              handleCreateCategory(e, gs.group.id, gs.group.mode, gs.group.kind)
-            }
-            className="flex items-center gap-2 px-3 py-2 bg-app border-t border-line"
-          >
-            <input
-              type="text"
-              placeholder={t('worksheet.newCategoryPlaceholder')}
-              value={newCatName}
-              onChange={(e) => setNewCatName(e.target.value)}
-              autoFocus
-              className="flex-1 h-7 px-2 rounded bg-surface border border-line text-xs text-ink focus:outline-none"
-            />
-            <input
-              type="number"
-              step="0.05"
-              placeholder={t('worksheet.budgetZeroPlaceholder')}
-              value={newCatBudget}
-              onChange={(e) => setNewCatBudget(e.target.value)}
-              className="w-24 h-7 px-2 rounded bg-surface border border-line text-xs text-ink tabular-nums text-right focus:outline-none"
-            />
-            <button
-              type="submit"
-              className="h-7 px-2.5 rounded bg-ink text-on-ink text-xs cursor-pointer"
-            >
-              {t('common.add')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setAddingToGroupId(null)}
-              className="h-7 px-2 rounded text-xs text-ink-2 hover:bg-raised cursor-pointer"
-            >
-              {t('common.cancel')}
-            </button>
-          </form>
-        )}
-
-        {/* Group Total Footer (Matches Excel "Total HOME EXPENSES", etc.) */}
-        <div className="grid grid-cols-[1fr_84px_84px_84px_54px] items-center gap-1.5 px-3 py-2 bg-app/80 border-t border-line text-[12px] font-semibold">
-          <span className="text-ink truncate">{tf('worksheet.totalGroup', { group: displayGroupName })}</span>
-          <span className="text-right tabular-nums text-ink-2 px-1.5">
-            {formatNumber(gs.totalBudget)}
-          </span>
-          <span className="text-right tabular-nums text-ink px-1.5">
-            {formatNumber(gs.totalActual)}
-          </span>
-          <span
-            className={`text-right tabular-nums pr-1 ${
-              isPositiveDiff
-                ? 'text-positive'
-                : isNegativeDiff
-                  ? 'text-accent'
-                  : 'text-ink-3'
-            }`}
-          >
-            {isPositiveDiff ? '+' : ''}
-            {formatNumber(gs.totalDifference)}
-          </span>
-          <span />
         </div>
       </section>
     );
@@ -594,6 +1097,66 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Sort Selector */}
+          <div className="inline-flex items-center gap-1">
+            <div className="inline-flex items-center gap-1.5 h-8 pl-2.5 pr-1 rounded-lg bg-surface border border-line text-xs text-ink-2">
+              <ArrowUpDown className="w-3.5 h-3.5 text-ink-3 shrink-0" />
+              <span className="hidden sm:inline text-ink-2">{t('worksheet.sortLabel')}:</span>
+              <KobanSelect
+                value={sortBy}
+                onChange={(val) => {
+                  const nextField = val as WorksheetSortField;
+                  const nextDir: WorksheetSortDirection =
+                    nextField === 'name' || nextField === 'manual' ? 'asc' : 'desc';
+                  onUpdateSettings?.({
+                    worksheetSortBy: nextField,
+                    worksheetSortDir: nextDir,
+                  });
+                }}
+                tone="surface"
+                size="xs"
+                className="!border-0 !bg-transparent !h-6 !px-1.5 font-medium text-ink"
+                options={[
+                  { value: 'manual', label: t('worksheet.sortManual') },
+                  { value: 'name', label: t('worksheet.sortName') },
+                  { value: 'budget', label: t('worksheet.sortBudget') },
+                  { value: 'actual', label: t('worksheet.sortActual') },
+                  { value: 'diff', label: t('worksheet.sortDiff') },
+                ]}
+              />
+            </div>
+            {sortBy !== 'manual' && (
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateSettings?.({
+                    worksheetSortDir: sortDir === 'asc' ? 'desc' : 'asc',
+                  })
+                }
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg bg-surface border border-line text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
+                title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
+              >
+                {sortDir === 'asc' ? (
+                  <ArrowUp className="w-3.5 h-3.5 text-indigo" />
+                ) : (
+                  <ArrowDown className="w-3.5 h-3.5 text-indigo" />
+                )}
+              </button>
+            )}
+          </div>
+
+          {hasCustomWidths && (
+            <button
+              type="button"
+              onClick={resetAllWidths}
+              className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg bg-surface border border-line text-xs text-ink-2 hover:text-ink hover:bg-raised transition-colors cursor-pointer"
+              title={t('worksheet.resizeColTip')}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{t('worksheet.resetWidthsBtn')}</span>
+            </button>
+          )}
+
           <button
             onClick={() => setHideZeroRows((v) => !v)}
             className={`h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs transition-colors cursor-pointer ${
@@ -945,95 +1508,187 @@ export const MonthlyWorksheetView: React.FC<MonthlyWorksheetViewProps> = ({
         </div>
       )}
 
-      {/* Two-Column Vertex42 Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      {/* Two-Column Responsive Vertex42 Layout (automatically stacks below 900px container width) */}
+      <div
+        ref={splitContainerRef}
+        style={
+          isTwoColumn
+            ? {
+                gridTemplateColumns: `minmax(0, ${colWidths.leftPanePct}fr) 12px minmax(0, ${100 - colWidths.leftPanePct}fr)`,
+              }
+            : undefined
+        }
+        className={`grid items-start ${isTwoColumn ? 'gap-y-5' : 'grid-cols-1 gap-5'}`}
+      >
         {/* LEFT COLUMN */}
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {leftGroups.map(renderGroupBlock)}
         </div>
 
+        {/* Center Pane Split Handle */}
+        {isTwoColumn && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={startSplitResize}
+            onDoubleClick={() => {
+              const next = { ...colWidthsRef.current, leftPanePct: 50 };
+              colWidthsRef.current = next;
+              setColWidths(next);
+              onUpdateSettings?.({ worksheetColumnWidths: next });
+            }}
+            title={t('worksheet.resizeSplitTip')}
+            className="self-stretch w-3 flex items-stretch justify-center cursor-col-resize group/split select-none"
+          >
+            <span
+              className={`w-[2px] my-2 rounded-full transition-colors ${
+                resizingSplit
+                  ? 'bg-indigo'
+                  : 'bg-line/70 group-hover/split:bg-indigo'
+              }`}
+            />
+          </div>
+        )}
+
         {/* RIGHT COLUMN: Starts with the iconic BUDGET SUMMARY table just like Vertex42! */}
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {/* BUDGET SUMMARY Box */}
           <section className="bg-surface border-2 border-ink/80 rounded-xl overflow-hidden shadow-xs">
-            <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-2.5 bg-ink text-on-ink text-[11px] font-semibold uppercase tracking-[0.08em]">
-              <span>{t('worksheet.budgetSummary')}</span>
-              <span className="text-right font-normal opacity-80">{t('finance.budget')}</span>
-              <span className="text-right font-normal opacity-80">{t('finance.actual')}</span>
-              <span className="text-right font-normal opacity-80">
-                {t('worksheet.difference')}
-              </span>
-            </div>
-
-            <div className="divide-y divide-line text-[13px]">
-              {/* Total Income */}
-              <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-2.5">
-                <span className="text-ink font-medium">{t('sidebar.totalIncome')}</span>
-                <span className="text-right tabular-nums text-ink-2">
-                  {formatNumber(summary.incomeBudget)}
-                </span>
-                <span className="text-right tabular-nums text-positive font-semibold">
-                  {formatNumber(summary.incomeActual)}
-                </span>
-                <span
-                  className={`text-right tabular-nums font-medium ${
-                    summary.incomeDifference >= 0
-                      ? 'text-positive'
-                      : 'text-accent'
-                  }`}
+            <div className="overflow-x-auto">
+              <div className="w-full" style={{ minWidth: `${summaryMinTableWidth}px` }}>
+                <div
+                  style={summaryGridStyle}
+                  className="grid items-center gap-1 px-4 py-2.5 bg-ink text-on-ink text-[11px] font-semibold uppercase tracking-[0.08em]"
                 >
-                  {summary.incomeDifference > 0 ? '+' : ''}
-                  {formatNumber(summary.incomeDifference)}
-                </span>
-              </div>
-
-              {/* Total Expenses */}
-              <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-2.5">
-                <span className="text-ink font-medium">{t('sidebar.totalExpenses')}</span>
-                <span className="text-right tabular-nums text-ink-2">
-                  {formatNumber(summary.totalOutflowBudget)}
-                </span>
-                <span className="text-right tabular-nums text-ink font-semibold">
-                  {formatNumber(summary.totalOutflowActual)}
-                </span>
-                <span
-                  className={`text-right tabular-nums font-medium ${
-                    summary.totalOutflowDifference >= 0
-                      ? 'text-positive'
-                      : 'text-accent'
-                  }`}
-                >
-                  {summary.totalOutflowDifference > 0 ? '+' : ''}
-                  {formatNumber(summary.totalOutflowDifference)}
-                </span>
-              </div>
-
-              {/* NET */}
-              <div className="grid grid-cols-[1fr_92px_92px_92px] items-center gap-1.5 px-4 py-3 bg-raised/70 font-semibold">
-                <div className="flex items-center gap-2">
-                  <span className="text-ink">{t('finance.net')}</span>
-                  <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-surface border border-line text-ink-2 tabular-nums">
-                    {tf('worksheet.retainedPct', { pct: summary.savingsRatePct.toFixed(1) })}
-                  </span>
+                  <span className="truncate">{t('worksheet.budgetSummary')}</span>
+                  {(
+                    [
+                      ['budget', t('finance.budget')],
+                      ['actual', t('finance.actual')],
+                      ['diff', t('worksheet.difference')],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <div
+                      key={field}
+                      className="relative flex items-center justify-end min-w-0 select-none"
+                    >
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        onPointerDown={(e) => startColResize(field, e)}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          resetNumericColWidths();
+                        }}
+                        title={t('worksheet.resizeColTip')}
+                        className="absolute -left-1.5 top-[-6px] bottom-[-6px] w-2.5 cursor-col-resize z-10 flex items-center justify-center group/resize"
+                      >
+                        <span
+                          className={`w-[2px] h-3.5 rounded-full transition-colors ${
+                            resizingCol === field
+                              ? 'bg-on-ink'
+                              : 'bg-on-ink/35 group-hover/resize:bg-on-ink'
+                          }`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => cycleColumnSort(field)}
+                        className="inline-flex items-center justify-end gap-0.5 max-w-full truncate font-normal opacity-85 hover:opacity-100 cursor-pointer"
+                        title={`${t('worksheet.sortLabel')}: ${label}`}
+                      >
+                        <span className="truncate">{label}</span>
+                        {sortBy === field &&
+                          (sortDir === 'asc' ? (
+                            <ArrowUp className="w-3 h-3 shrink-0" />
+                          ) : (
+                            <ArrowDown className="w-3 h-3 shrink-0" />
+                          ))}
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                <span className="text-right tabular-nums text-ink-2">
-                  {formatNumber(summary.netBudget)}
-                </span>
-                <span
-                  className={`text-right tabular-nums ${
-                    summary.netActual >= 0 ? 'text-positive' : 'text-accent'
-                  }`}
-                >
-                  {formatNumber(summary.netActual)}
-                </span>
-                <span
-                  className={`text-right tabular-nums ${
-                    summary.netDifference >= 0 ? 'text-positive' : 'text-accent'
-                  }`}
-                >
-                  {summary.netDifference > 0 ? '+' : ''}
-                  {formatNumber(summary.netDifference)}
-                </span>
+
+                <div className="divide-y divide-line text-[13px]">
+                  {/* Total Income */}
+                  <div
+                    style={summaryGridStyle}
+                    className="grid items-center gap-1 px-4 py-2.5"
+                  >
+                    <span className="text-ink font-medium truncate">{t('sidebar.totalIncome')}</span>
+                    <span className="text-right tabular-nums text-ink-2 truncate">
+                      {formatNumber(summary.incomeBudget)}
+                    </span>
+                    <span className="text-right tabular-nums text-positive font-semibold truncate">
+                      {formatNumber(summary.incomeActual)}
+                    </span>
+                    <span
+                      className={`text-right tabular-nums font-medium truncate ${
+                        summary.incomeDifference >= 0
+                          ? 'text-positive'
+                          : 'text-accent'
+                      }`}
+                    >
+                      {summary.incomeDifference > 0 ? '+' : ''}
+                      {formatNumber(summary.incomeDifference)}
+                    </span>
+                  </div>
+
+                  {/* Total Expenses */}
+                  <div
+                    style={summaryGridStyle}
+                    className="grid items-center gap-1 px-4 py-2.5"
+                  >
+                    <span className="text-ink font-medium truncate">{t('sidebar.totalExpenses')}</span>
+                    <span className="text-right tabular-nums text-ink-2 truncate">
+                      {formatNumber(summary.totalOutflowBudget)}
+                    </span>
+                    <span className="text-right tabular-nums text-ink font-semibold truncate">
+                      {formatNumber(summary.totalOutflowActual)}
+                    </span>
+                    <span
+                      className={`text-right tabular-nums font-medium truncate ${
+                        summary.totalOutflowDifference >= 0
+                          ? 'text-positive'
+                          : 'text-accent'
+                      }`}
+                    >
+                      {summary.totalOutflowDifference > 0 ? '+' : ''}
+                      {formatNumber(summary.totalOutflowDifference)}
+                    </span>
+                  </div>
+
+                  {/* NET */}
+                  <div
+                    style={summaryGridStyle}
+                    className="grid items-center gap-1 px-4 py-3 bg-raised/70 font-semibold"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                      <span className="text-ink truncate">{t('finance.net')}</span>
+                      <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-surface border border-line text-ink-2 tabular-nums shrink-0">
+                        {tf('worksheet.retainedPct', { pct: summary.savingsRatePct.toFixed(1) })}
+                      </span>
+                    </div>
+                    <span className="text-right tabular-nums text-ink-2 truncate">
+                      {formatNumber(summary.netBudget)}
+                    </span>
+                    <span
+                      className={`text-right tabular-nums truncate ${
+                        summary.netActual >= 0 ? 'text-positive' : 'text-accent'
+                      }`}
+                    >
+                      {formatNumber(summary.netActual)}
+                    </span>
+                    <span
+                      className={`text-right tabular-nums truncate ${
+                        summary.netDifference >= 0 ? 'text-positive' : 'text-accent'
+                      }`}
+                    >
+                      {summary.netDifference > 0 ? '+' : ''}
+                      {formatNumber(summary.netDifference)}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </section>

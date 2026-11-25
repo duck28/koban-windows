@@ -233,6 +233,7 @@ export interface PendingImportFile {
 }
 
 export type RecurringFrequency =
+  | 'weekly'
   | 'biweekly'
   | 'monthly'
   | 'bimonthly'
@@ -250,9 +251,9 @@ export interface RecurringRule {
   frequency: RecurringFrequency;
   dayOfMonth: number;
   /**
-   * Bi-weekly only: date (YYYY-MM-DD) of the first occurrence. Every further
-   * occurrence is 14 days later. Picked as a start week + weekday in the UI.
-   * Absent on legacy rules ⇒ two occurrences per month (dayOfMonth & +14).
+   * Starting date (YYYY-MM-DD) of the first occurrence.
+   * For weekly / bi-weekly, every further occurrence repeats every 7 / 14 days.
+   * For monthly / bi-monthly / quarterly / yearly, determines the first due month & day.
    */
   startDate?: string;
   /**
@@ -282,6 +283,17 @@ export interface SavingsGoal {
 export type ThemePalette = 'default' | 'monochrome' | 'slate' | 'forest';
 export type UiDensity = 'comfortable' | 'compact';
 
+export type WorksheetSortField = 'manual' | 'name' | 'budget' | 'actual' | 'diff';
+export type WorksheetSortDirection = 'asc' | 'desc';
+
+export interface WorksheetColumnWidths {
+  budget: number;
+  actual: number;
+  diff: number;
+  /** Desktop left-column split percentage (34..66, default 50) */
+  leftPanePct?: number;
+}
+
 export interface AppSettings {
   setupCompleted: boolean;
   setupMode: ProfileSetupMode;
@@ -294,6 +306,11 @@ export interface AppSettings {
   density?: UiDensity;
   /** Personalization: High-contrast numbers & balances */
   highContrastAmounts?: boolean;
+  /** Monthly Worksheet column widths & desktop split ratio */
+  worksheetColumnWidths?: WorksheetColumnWidths;
+  /** Monthly Worksheet category row sort field & direction */
+  worksheetSortBy?: WorksheetSortField;
+  worksheetSortDir?: WorksheetSortDirection;
   backupDir: string;
   autoBackup: boolean;
   maxBackups: number;
@@ -381,6 +398,7 @@ export interface WebDavRemoteInfo {
 }
 
 export type YearlyPlanSchedule =
+  | 'weekly'
   | 'biweekly'
   | 'monthly'
   | 'bimonthly'
@@ -399,7 +417,7 @@ export interface YearlyPlanItem {
   annualAmount: number;
   /**
    * How often the amount falls due (annual = per-payment amount × payments per year):
-   * bi-weekly (26), monthly (12), bi-monthly (6), quarterly (4) or a yearly lump sum (1).
+   * weekly (52), bi-weekly (26), monthly (12), bi-monthly (6), quarterly (4) or a yearly lump sum (1).
    */
   schedule: YearlyPlanSchedule;
   /** Primary account this planned income/expense corresponds to (paid from / deposited into) */

@@ -753,7 +753,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               {/* Recurring Auto-Detection Legend Bar */}
               <div className="px-3.5 py-2 rounded-xl bg-indigo/10 border border-indigo/25 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2 text-ink">
-                  <span className="w-5 h-5 rounded-md bg-indigo text-white inline-flex items-center justify-center shrink-0">
+                  <span className="w-5 h-5 rounded-md bg-indigo text-on-indigo inline-flex items-center justify-center shrink-0">
                     <Repeat className="w-3 h-3" />
                   </span>
                   <span>

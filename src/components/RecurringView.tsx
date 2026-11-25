@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -16,11 +16,8 @@ import {
   RecurringRule,
 } from '../types';
 import {
-  dateInIsoWeek,
   formatCurrency,
   getRecurringOccurrenceDates,
-  isoWeekdayOfDate,
-  isoWeekOfDate,
   recurringMonthInterval,
   recurringMonthlyEquivalent,
   todayIso,
@@ -46,25 +43,28 @@ interface RecurringViewProps {
 const needsStartMonth = (f: RecurringFrequency) => recurringMonthInterval(f) > 1;
 
 /**
- * Fields a rule needs when switching frequency: bi-weekly needs a start week
- * (first occurrence date), bi-monthly / quarterly / yearly a start month.
- * Missing ones are pre-filled so the picker shows up with a sensible value.
+ * Fields a rule needs when switching frequency: pre-fills startDate and startMonth
+ * when missing so every scheduled rule has a concrete starting date.
  */
 export function scheduleDefaultsFor(
   frequency: RecurringFrequency,
   rule: Pick<RecurringRule, 'startDate' | 'startMonth' | 'dayOfMonth'>,
   monthKey: string
 ): Partial<RecurringRule> {
-  if (frequency === 'biweekly' && !rule.startDate) {
-    const today = todayIso();
-    const day = String(Math.min(28, Math.max(1, rule.dayOfMonth || 1))).padStart(2, '0');
-    const candidate = `${monthKey}-${day}`;
-    return { startDate: monthKey === today.slice(0, 7) ? today : candidate };
+  const today = todayIso();
+  const day = String(Math.min(28, Math.max(1, rule.dayOfMonth || 1))).padStart(2, '0');
+  const fallbackDate = monthKey === today.slice(0, 7) ? today : `${monthKey}-${day}`;
+  const patch: Partial<RecurringRule> = {};
+  if (!rule.startDate) {
+    patch.startDate =
+      rule.startMonth && /^\d{4}-\d{2}$/.test(rule.startMonth)
+        ? `${rule.startMonth}-${day}`
+        : fallbackDate;
   }
   if (needsStartMonth(frequency) && !rule.startMonth) {
-    return { startMonth: monthKey };
+    patch.startMonth = (patch.startDate ?? rule.startDate ?? fallbackDate).slice(0, 7);
   }
-  return {};
+  return patch;
 }
 
 const pickerClass =
@@ -96,28 +96,20 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<RecurringFrequency>('monthly');
   const [dayOfMonth, setDayOfMonth] = useState('1');
-  const [startDate, setStartDate] = useState<string>('');
-  const [startMonth, setStartMonth] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>(() => {
+    const today = todayIso();
+    return today.startsWith(monthKey) ? today : `${monthKey}-01`;
+  });
+  const [startMonth, setStartMonth] = useState<string>(monthKey);
 
   const frequencyOptions: KobanSelectOption[] = [
+    { value: 'weekly', label: t('recurring.freqWeekly') },
     { value: 'biweekly', label: t('recurring.freqBiweekly') },
     { value: 'monthly', label: t('recurring.freqMonthly') },
     { value: 'bimonthly', label: t('recurring.freqBimonthly') },
     { value: 'quarterly', label: t('recurring.freqQuarterly') },
     { value: 'yearly', label: t('recurring.freqYearly') },
   ];
-
-  const weekdayOptions: KobanSelectOption[] = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(intlLocale, {
-      weekday: 'short',
-      timeZone: 'UTC',
-    });
-    // 2024-01-01 was a Monday
-    return Array.from({ length: 7 }, (_, i) => ({
-      value: String(i),
-      label: fmt.format(new Date(Date.UTC(2024, 0, 1 + i))),
-    }));
-  }, [intlLocale]);
 
   const formatShortDate = (iso: string) =>
     new Intl.DateTimeFormat(intlLocale, {
@@ -159,10 +151,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
     if (!categoryId || Number.isNaN(numAmt) || numAmt < 0) return;
     const cat = catMap.get(categoryId);
     if (!cat) return;
-    if (frequency === 'biweekly' && !startDate) return;
-    if (needsStartMonth(frequency) && !startMonth) return;
+    const isSubMonthly = frequency === 'weekly' || frequency === 'biweekly';
+    if (isSubMonthly && !startDate) return;
+    const resolvedStartMonth = startMonth || (startDate ? startDate.slice(0, 7) : '');
+    if (needsStartMonth(frequency) && !resolvedStartMonth) return;
 
     const day = Math.min(28, Math.max(1, parseInt(dayOfMonth, 10) || 1));
+    const startDay = startDate
+      ? Math.min(28, Math.max(1, parseInt(startDate.slice(8, 10), 10) || day))
+      : day;
     onAddRule({
       mode: cat.mode,
       type: cat.kind === 'income' ? 'income' : 'expense',
@@ -170,10 +167,13 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       description: description.trim() || cat.name,
       amount: numAmt,
       frequency,
-      dayOfMonth:
-        frequency === 'biweekly' ? parseInt(startDate.slice(8, 10), 10) : day,
-      startDate: frequency === 'biweekly' ? startDate : undefined,
-      startMonth: needsStartMonth(frequency) ? startMonth : undefined,
+      dayOfMonth: isSubMonthly || startDate ? startDay : day,
+      startDate: startDate || undefined,
+      startMonth: needsStartMonth(frequency)
+        ? resolvedStartMonth
+        : startDate
+          ? startDate.slice(0, 7)
+          : undefined,
       taxRate: cat.taxRate ?? 0,
       deductiblePct: cat.deductiblePct ?? 100,
       active: true,
@@ -203,84 +203,67 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
       0
     );
 
-  /** Start-week / weekday or start-month pickers for a rule (or the add form). */
+  /** Starting date picker for a recurring rule (or the add form). */
   const renderStartPickers = (opts: {
     frequency: RecurringFrequency;
+    dayOfMonth?: number;
     startDate?: string;
     startMonth?: string;
-    onStartDate: (d: string | undefined) => void;
-    onStartMonth: (m: string | undefined) => void;
+    onChangeStart: (patch: {
+      startDate?: string;
+      startMonth?: string;
+      dayOfMonth?: number;
+    }) => void;
     compact?: boolean;
   }) => {
+    const dayStr = String(
+      Math.min(28, Math.max(1, opts.dayOfMonth || 1))
+    ).padStart(2, '0');
+    const dateVal =
+      opts.startDate ??
+      (opts.startMonth && /^\d{4}-\d{2}$/.test(opts.startMonth)
+        ? `${opts.startMonth}-${dayStr}`
+        : '');
+    const isRequired =
+      opts.frequency === 'weekly' ||
+      opts.frequency === 'biweekly' ||
+      needsStartMonth(opts.frequency);
     const missingClass = 'border-accent/70 bg-accent/5';
-    if (opts.frequency === 'biweekly') {
-      const week = opts.startDate ? isoWeekOfDate(opts.startDate) ?? '' : '';
-      const weekday = opts.startDate ? isoWeekdayOfDate(opts.startDate) ?? 0 : 4;
-      return (
-        <>
-          <label className="inline-flex flex-col gap-1">
-            {!opts.compact && (
-              <span className="text-[11px] text-ink-2">{t('recurring.startWeekLabel')}</span>
-            )}
-            <input
-              type="week"
-              value={week}
-              required
-              title={t('recurring.startWeekLabel')}
-              onChange={(e) =>
-                opts.onStartDate(
-                  e.target.value
-                    ? dateInIsoWeek(e.target.value, weekday) ?? undefined
-                    : undefined
-                )
-              }
-              className={`${pickerClass} ${opts.compact ? '' : 'h-8 rounded-lg text-xs'} ${
-                week ? 'border-line' : missingClass
-              }`}
-            />
-          </label>
-          <label className="inline-flex flex-col gap-1">
-            {!opts.compact && (
-              <span className="text-[11px] text-ink-2">{t('recurring.weekdayLabel')}</span>
-            )}
-            <KobanSelect
-              value={String(weekday)}
-              onChange={(val) => {
-                const baseWeek = week || isoWeekOfDate(todayIso());
-                if (!baseWeek) return;
-                opts.onStartDate(dateInIsoWeek(baseWeek, Number(val)) ?? undefined);
-              }}
-              options={weekdayOptions}
-              searchable={false}
-              tone="default"
-              size={opts.compact ? 'xs' : 'sm'}
-              className={opts.compact ? 'w-[76px]' : 'w-[92px]'}
-              title={t('recurring.weekdayLabel')}
-            />
-          </label>
-        </>
-      );
-    }
-    if (needsStartMonth(opts.frequency)) {
-      return (
-        <label className="inline-flex flex-col gap-1">
-          {!opts.compact && (
-            <span className="text-[11px] text-ink-2">{t('recurring.startMonthLabel')}</span>
-          )}
-          <input
-            type="month"
-            value={opts.startMonth ?? ''}
-            required
-            title={t('recurring.startMonthLabel')}
-            onChange={(e) => opts.onStartMonth(e.target.value || undefined)}
-            className={`${pickerClass} ${opts.compact ? '' : 'h-8 rounded-lg text-xs'} ${
-              opts.startMonth ? 'border-line' : missingClass
-            }`}
-          />
-        </label>
-      );
-    }
-    return null;
+
+    return (
+      <label className="inline-flex flex-col gap-1">
+        {!opts.compact && (
+          <span className="text-[11px] text-ink-2">
+            {t('recurring.startDateLabel')}
+          </span>
+        )}
+        <input
+          type="date"
+          value={dateVal}
+          required={isRequired}
+          title={t('recurring.startDateLabel')}
+          onChange={(e) => {
+            const d = e.target.value || undefined;
+            if (!d) {
+              opts.onChangeStart({ startDate: undefined, startMonth: undefined });
+              return;
+            }
+            const clampedDay = Math.min(
+              28,
+              Math.max(1, parseInt(d.slice(8, 10), 10) || 1)
+            );
+            opts.onChangeStart({
+              startDate: d,
+              startMonth: d.slice(0, 7),
+              dayOfMonth: clampedDay,
+            });
+          }}
+          className={`${pickerClass} ${opts.compact ? '' : 'h-8 rounded-lg text-xs'} ${
+            !isRequired || dateVal ? 'border-line' : missingClass
+          }`}
+        />
+      </label>
+    );
   };
 
   return (
@@ -369,13 +352,19 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
 
         {renderStartPickers({
           frequency,
+          dayOfMonth: parseInt(dayOfMonth, 10) || 1,
           startDate: startDate || undefined,
           startMonth: startMonth || undefined,
-          onStartDate: (d) => setStartDate(d ?? ''),
-          onStartMonth: (m) => setStartMonth(m ?? ''),
+          onChangeStart: (p) => {
+            setStartDate(p.startDate ?? '');
+            setStartMonth(p.startMonth ?? '');
+            if (p.dayOfMonth !== undefined) {
+              setDayOfMonth(String(p.dayOfMonth));
+            }
+          },
         })}
 
-        {frequency !== 'biweekly' && (
+        {frequency !== 'weekly' && frequency !== 'biweekly' && (
           <div className="w-20 shrink-0">
             <label className="block text-[11px] text-ink-2 mb-1 truncate">
               {t('recurring.dayRangeLabel')}
@@ -385,7 +374,15 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
               min="1"
               max="28"
               value={dayOfMonth}
-              onChange={(e) => setDayOfMonth(e.target.value)}
+              onChange={(e) => {
+                setDayOfMonth(e.target.value);
+                const parsed = parseInt(e.target.value, 10);
+                if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 28 && startDate) {
+                  setStartDate(
+                    `${startDate.slice(0, 7)}-${String(parsed).padStart(2, '0')}`
+                  );
+                }
+              }}
               title={t('recurring.dayRangeLabel')}
               className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink text-center tabular-nums focus:outline-none"
             />
@@ -457,8 +454,8 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
               : tCategoryName(rule.description);
             const dates = getRecurringOccurrenceDates(rule, monthKey);
             const startMissing =
-              (rule.frequency === 'biweekly' && !rule.startDate) ||
-              (needsStartMonth(rule.frequency) && !rule.startMonth);
+              ((rule.frequency === 'weekly' || rule.frequency === 'biweekly') && !rule.startDate) ||
+              (needsStartMonth(rule.frequency) && !rule.startMonth && !rule.startDate);
             return (
               <div
                 key={rule.id}
@@ -536,18 +533,14 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
 
                   {renderStartPickers({
                     frequency: rule.frequency,
+                    dayOfMonth: rule.dayOfMonth,
                     startDate: rule.startDate,
                     startMonth: rule.startMonth,
                     compact: true,
-                    onStartDate: (d) =>
-                      onUpdateRule(rule.id, {
-                        startDate: d,
-                        ...(d ? { dayOfMonth: parseInt(d.slice(8, 10), 10) } : {}),
-                      }),
-                    onStartMonth: (m) => onUpdateRule(rule.id, { startMonth: m }),
+                    onChangeStart: (p) => onUpdateRule(rule.id, p),
                   })}
 
-                  {rule.frequency !== 'biweekly' && (
+                  {rule.frequency !== 'weekly' && rule.frequency !== 'biweekly' && (
                     <div className="inline-flex items-center gap-1 text-[11px] text-ink-2">
                       <span>{t('recurring.dayLabel')}</span>
                       <InlineNumberInput
@@ -558,9 +551,17 @@ export const RecurringView: React.FC<RecurringViewProps> = ({
                         clampMax={28}
                         value={rule.dayOfMonth}
                         title={t('recurring.dayRangeLabel')}
-                        onValueChange={(v) =>
-                          onUpdateRule(rule.id, { dayOfMonth: Math.round(v) })
-                        }
+                        onValueChange={(v) => {
+                          const clamped = Math.min(28, Math.max(1, Math.round(v)));
+                          onUpdateRule(rule.id, {
+                            dayOfMonth: clamped,
+                            ...(rule.startDate
+                              ? {
+                                  startDate: `${rule.startDate.slice(0, 7)}-${String(clamped).padStart(2, '0')}`,
+                                }
+                              : {}),
+                          });
+                        }}
                         className="w-12 text-[11px]"
                       />
                     </div>

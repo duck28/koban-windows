@@ -20,6 +20,9 @@
   --warning: #b8862d;    /* gold ochre (approaching limit / tax reserve) */
   --viewer: #e8e5de;     /* backdrop */
   --on-ink: #fbfaf7;     /* text on ink buttons */
+  --on-accent: #ffffff;  /* text on accent buttons */
+  --on-positive: #ffffff;/* text on positive buttons */
+  --on-indigo: #ffffff;  /* text on indigo buttons */
   color-scheme: light;
 }
 
@@ -38,6 +41,9 @@
     --warning: #e0a94c;
     --viewer: #0f0f0e;
     --on-ink: #161614;
+    --on-accent: #ffffff;
+    --on-positive: #ffffff;
+    --on-indigo: #ffffff;
     color-scheme: dark;
   }
 }
@@ -56,6 +62,9 @@
   --warning: #e0a94c;
   --viewer: #0f0f0e;
   --on-ink: #161614;
+  --on-accent: #ffffff;
+  --on-positive: #ffffff;
+  --on-indigo: #ffffff;
   color-scheme: dark;
 }
 
@@ -77,6 +86,9 @@
   --warning: #616161;
   --viewer: #eaeaea;
   --on-ink: #ffffff;
+  --on-accent: #ffffff;
+  --on-positive: #ffffff;
+  --on-indigo: #ffffff;
   color-scheme: light;
 }
 
@@ -95,6 +107,9 @@
     --warning: #999999;
     --viewer: #000000;
     --on-ink: #000000;
+    --on-accent: #000000;
+    --on-positive: #000000;
+    --on-indigo: #000000;
     color-scheme: dark;
   }
 }
@@ -113,6 +128,9 @@
   --warning: #999999;
   --viewer: #000000;
   --on-ink: #000000;
+  --on-accent: #000000;
+  --on-positive: #000000;
+  --on-indigo: #000000;
   color-scheme: dark;
 }
 
@@ -134,6 +152,9 @@
   --warning: #d97706;
   --viewer: #e2e8f0;
   --on-ink: #ffffff;
+  --on-accent: #ffffff;
+  --on-positive: #ffffff;
+  --on-indigo: #ffffff;
   color-scheme: light;
 }
 
@@ -152,6 +173,9 @@
     --warning: #fbbf24;
     --viewer: #070a0f;
     --on-ink: #0b0f17;
+    --on-accent: #0b0f17;
+    --on-positive: #0b0f17;
+    --on-indigo: #0b0f17;
     color-scheme: dark;
   }
 }
@@ -170,6 +194,9 @@
   --warning: #fbbf24;
   --viewer: #070a0f;
   --on-ink: #0b0f17;
+  --on-accent: #0b0f17;
+  --on-positive: #0b0f17;
+  --on-indigo: #0b0f17;
   color-scheme: dark;
 }
 
@@ -191,6 +218,9 @@
   --warning: #c28100;
   --viewer: #e3eae1;
   --on-ink: #ffffff;
+  --on-accent: #ffffff;
+  --on-positive: #ffffff;
+  --on-indigo: #ffffff;
   color-scheme: light;
 }
 
@@ -209,6 +239,9 @@
     --warning: #facc15;
     --viewer: #080d0a;
     --on-ink: #0c1410;
+    --on-accent: #0c1410;
+    --on-positive: #0c1410;
+    --on-indigo: #0c1410;
     color-scheme: dark;
   }
 }
@@ -227,6 +260,9 @@
   --warning: #facc15;
   --viewer: #080d0a;
   --on-ink: #0c1410;
+  --on-accent: #0c1410;
+  --on-positive: #0c1410;
+  --on-indigo: #0c1410;
   color-scheme: dark;
 }
 
@@ -260,7 +296,20 @@
   --color-warning: var(--warning);
   --color-viewer: var(--viewer);
   --color-on-ink: var(--on-ink);
+  --color-on-accent: var(--on-accent);
+  --color-on-positive: var(--on-positive);
+  --color-on-indigo: var(--on-indigo);
   --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+}
+
+.bg-accent.text-white {
+  color: var(--on-accent);
+}
+.bg-positive.text-white {
+  color: var(--on-positive);
+}
+.bg-indigo.text-white {
+  color: var(--on-indigo);
 }
 
 @layer base {

@@ -141,6 +141,7 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
   );
 
   const scheduleOptions: { value: YearlyPlanSchedule; label: string }[] = [
+    { value: 'weekly', label: t('recurring.freqWeekly') },
     { value: 'biweekly', label: t('recurring.freqBiweekly') },
     { value: 'monthly', label: t('recurring.freqMonthly') },
     { value: 'bimonthly', label: t('recurring.freqBimonthly') },
@@ -148,13 +149,15 @@ export const YearlyBudgetPlannerView: React.FC<YearlyBudgetPlannerViewProps> = (
     { value: 'annual_lump', label: t('recurring.freqYearly') },
   ];
   const perPeriodShort = (s: YearlyPlanSchedule) =>
-    s === 'biweekly'
-      ? t('yearly.perBiweeklyShort')
-      : s === 'bimonthly'
-        ? t('yearly.perBimonthlyShort')
-        : s === 'quarterly'
-          ? t('yearly.perQuarterShort')
-          : t('yearly.moShort');
+    s === 'weekly'
+      ? t('yearly.perWeeklyShort')
+      : s === 'biweekly'
+        ? t('yearly.perBiweeklyShort')
+        : s === 'bimonthly'
+          ? t('yearly.perBimonthlyShort')
+          : s === 'quarterly'
+            ? t('yearly.perQuarterShort')
+            : t('yearly.moShort');
   const [quickAccountId, setQuickAccountId] = useState<string>(
     defaultLiquidAccountId
   );

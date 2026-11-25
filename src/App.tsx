@@ -32,8 +32,14 @@ import {
 } from './data/templates';
 import {
   buildRecurringTransactionsForMonth,
+  computeAccountLiveBalance,
+  computeWorksheetSavingsTransfers,
+  getRecurringOccurrenceDates,
   isAccountTransfer,
   isScheduledRule,
+  recurringAmountForMonth,
+  reorderCategoriesList,
+  savingsTargetMap,
   TRANSFER_CATEGORY_ID,
   computeAnnualSeries,
   computeMonthSummary,
@@ -1073,10 +1079,14 @@ export function App() {
 
   const handleUpdateBudget = (categoryId: string, newBudget: number) => {
     setState((prev) => {
-      // Budgets driven by a scheduled recurring rule (bi-weekly, bi-monthly…)
+      // Budgets driven by a scheduled recurring rule (weekly, bi-weekly, bi-monthly…)
       // vary per month: a typed value only overrides this month.
       const hasScheduledRule = prev.recurringRules.some(
-        (r) => r.active && r.categoryId === categoryId && isScheduledRule(r)
+        (r) =>
+          r.active &&
+          r.amount > 0 &&
+          r.categoryId === categoryId &&
+          isScheduledRule(r)
       );
       if (hasScheduledRule) {
         const sIdx = prev.monthlyBudgets.findIndex(
@@ -1109,24 +1119,36 @@ export function App() {
       );
       const nextBudgets = [...prev.monthlyBudgets];
       if (idx >= 0) {
-        nextBudgets[idx] = { ...nextBudgets[idx], budget: newBudget };
+        nextBudgets[idx] = { ...nextBudgets[idx], budget: newBudget, budgetManual: false };
       } else {
         nextBudgets.push({
           monthKey,
           categoryId,
           budget: newBudget,
           directActual: null,
+          budgetManual: false,
         });
       }
       const nextCats = prev.categories.map((c) =>
         c.id === categoryId ? { ...c, defaultBudget: newBudget } : c
       );
-      const nextRecurring = prev.recurringRules.map((r) =>
-        r.categoryId === categoryId &&
-        (r.amount === 0 || Math.abs(r.amount - oldDefaultBudget) < 0.01)
-          ? { ...r, amount: newBudget }
-          : r
-      );
+      const nextRecurring = prev.recurringRules.map((r) => {
+        if (
+          r.categoryId !== categoryId ||
+          !(r.amount === 0 || Math.abs(r.amount - oldDefaultBudget) < 0.01)
+        ) {
+          return r;
+        }
+        if (isScheduledRule(r)) {
+          const dates = getRecurringOccurrenceDates(r, monthKey);
+          const perOccurrence =
+            dates && dates.length > 0
+              ? Math.round((newBudget / dates.length) * 100) / 100
+              : newBudget;
+          return { ...r, amount: perOccurrence };
+        }
+        return { ...r, amount: newBudget };
+      });
       return {
         ...prev,
         categories: nextCats,
@@ -1180,6 +1202,26 @@ export function App() {
       const year = prev.settings.activeYear;
 
       for (const cat of prev.categories) {
+        const isCatScheduled = prev.recurringRules.some(
+          (r) =>
+            r.active &&
+            r.amount > 0 &&
+            r.categoryId === cat.id &&
+            isScheduledRule(r)
+        );
+        if (isCatScheduled) {
+          for (let m = 1; m <= 12; m++) {
+            const mk = formatMonthKey(year, m);
+            const idx = nextBudgets.findIndex(
+              (mb) => mb.monthKey === mk && mb.categoryId === cat.id
+            );
+            if (idx >= 0 && nextBudgets[idx].budgetManual) {
+              nextBudgets[idx] = { ...nextBudgets[idx], budgetManual: false };
+            }
+          }
+          continue;
+        }
+
         const currentMb = prev.monthlyBudgets.find(
           (mb) => mb.monthKey === monthKey && mb.categoryId === cat.id
         );
@@ -1242,13 +1284,47 @@ export function App() {
       const nextBudgets = [...prev.monthlyBudgets];
 
       for (const cat of prev.categories) {
-        const srcVals = sourceRowMap.get(cat.id);
-        if (!srcVals) continue;
-
+        const scheduledRulesForCat = prev.recurringRules.filter(
+          (r) =>
+            r.active &&
+            r.amount > 0 &&
+            r.categoryId === cat.id &&
+            isScheduledRule(r)
+        );
         const targetIdx = nextBudgets.findIndex(
           (mb) =>
             mb.monthKey === opts.targetMonthKey && mb.categoryId === cat.id
         );
+
+        if (scheduledRulesForCat.length > 0) {
+          const targetScheduledAmt = scheduledRulesForCat.reduce(
+            (acc, r) =>
+              acc + (recurringAmountForMonth(r, opts.targetMonthKey) ?? 0),
+            0
+          );
+          if (targetIdx >= 0) {
+            nextBudgets[targetIdx] = {
+              ...nextBudgets[targetIdx],
+              budget: targetScheduledAmt,
+              budgetManual: false,
+              directActual:
+                targetScheduledAmt === 0 ? null : nextBudgets[targetIdx].directActual ?? null,
+            };
+          } else {
+            nextBudgets.push({
+              monthKey: opts.targetMonthKey,
+              categoryId: cat.id,
+              budget: targetScheduledAmt,
+              directActual: null,
+              budgetManual: false,
+            });
+          }
+          copiedCount++;
+          continue;
+        }
+
+        const srcVals = sourceRowMap.get(cat.id);
+        if (!srcVals) continue;
 
         const nextBudgetVal = srcVals.budget;
         const nextActualVal =
@@ -1425,6 +1501,23 @@ export function App() {
     }));
   };
 
+  const handleReorderCategory = (opts: {
+    draggedCategoryId: string;
+    targetGroupId: string;
+    targetCategoryId: string | null;
+    position: 'before' | 'after';
+    baseOrderIds?: string[];
+  }) => {
+    setState((prev) => ({
+      ...prev,
+      categories: reorderCategoriesList(prev.categories, prev.groups, opts),
+      settings: {
+        ...prev.settings,
+        worksheetSortBy: 'manual',
+      },
+    }));
+  };
+
   const handleDeleteCategory = async (categoryId: string) => {
     const cat = state.categories.find((c) => c.id === categoryId);
     if (
@@ -1571,16 +1664,40 @@ export function App() {
   };
 
   const handleAddRecurringRule = (ruleData: Omit<RecurringRule, 'id'>) => {
-    setState((prev) => ({
-      ...prev,
-      categories: prev.categories.map((c) =>
-        c.id === ruleData.categoryId ? { ...c, isRecurring: true } : c
-      ),
-      recurringRules: [
-        ...prev.recurringRules,
-        { ...ruleData, id: `rec-${Date.now()}` },
-      ],
-    }));
+    const newRule: RecurringRule = { ...ruleData, id: `rec-${Date.now()}` };
+    setState((prev) => {
+      let nextBudgets = prev.monthlyBudgets.map((mb) =>
+        mb.categoryId === newRule.categoryId ? { ...mb, budgetManual: false } : mb
+      );
+      let nextCategories = prev.categories.map((c) =>
+        c.id === newRule.categoryId ? { ...c, isRecurring: true } : c
+      );
+
+      if (!isScheduledRule(newRule) && newRule.amount > 0) {
+        const monthlyEq =
+          Math.round(
+            recurringMonthlyEquivalent(newRule.amount, newRule.frequency) * 100
+          ) / 100;
+        nextCategories = nextCategories.map((c) =>
+          c.id === newRule.categoryId && c.defaultBudget === 0
+            ? { ...c, defaultBudget: monthlyEq }
+            : c
+        );
+        const mbIdx = nextBudgets.findIndex(
+          (mb) => mb.monthKey === monthKey && mb.categoryId === newRule.categoryId
+        );
+        if (mbIdx >= 0 && nextBudgets[mbIdx].budget === 0) {
+          nextBudgets[mbIdx] = { ...nextBudgets[mbIdx], budget: monthlyEq };
+        }
+      }
+
+      return {
+        ...prev,
+        categories: nextCategories,
+        monthlyBudgets: nextBudgets,
+        recurringRules: [...prev.recurringRules, newRule],
+      };
+    });
     showNotification(`Added recurring rule "${ruleData.description}".`);
   };
 
@@ -1600,6 +1717,19 @@ export function App() {
       const updatedRule = nextRules.find((r) => r.id === id);
       if (
         targetRule &&
+        (patch.amount !== undefined ||
+          patch.frequency !== undefined ||
+          patch.startDate !== undefined ||
+          patch.startMonth !== undefined)
+      ) {
+        nextBudgets = nextBudgets.map((mb) =>
+          mb.categoryId === targetRule.categoryId
+            ? { ...mb, budgetManual: false }
+            : mb
+        );
+      }
+      if (
+        targetRule &&
         updatedRule &&
         !isScheduledRule(updatedRule) &&
         patch.amount !== undefined &&
@@ -1615,12 +1745,12 @@ export function App() {
             c.id === cat.id ? { ...c, defaultBudget: monthlyEq } : c
           );
         }
-        const mbIdx = prev.monthlyBudgets.findIndex(
+        const mbIdx = nextBudgets.findIndex(
           (mb) =>
             mb.monthKey === monthKey && mb.categoryId === targetRule.categoryId
         );
-        if (mbIdx >= 0 && prev.monthlyBudgets[mbIdx].budget === 0) {
-          nextBudgets = [...prev.monthlyBudgets];
+        if (mbIdx >= 0 && nextBudgets[mbIdx].budget === 0) {
+          nextBudgets = [...nextBudgets];
           nextBudgets[mbIdx] = {
             ...nextBudgets[mbIdx],
             budget: monthlyEq,
@@ -1638,12 +1768,22 @@ export function App() {
   };
 
   const handleToggleRecurringRule = (id: string) => {
-    setState((prev) => ({
-      ...prev,
-      recurringRules: prev.recurringRules.map((r) =>
-        r.id === id ? { ...r, active: !r.active } : r
-      ),
-    }));
+    setState((prev) => {
+      const rule = prev.recurringRules.find((r) => r.id === id);
+      return {
+        ...prev,
+        monthlyBudgets: rule
+          ? prev.monthlyBudgets.map((mb) =>
+              mb.categoryId === rule.categoryId
+                ? { ...mb, budgetManual: false }
+                : mb
+            )
+          : prev.monthlyBudgets,
+        recurringRules: prev.recurringRules.map((r) =>
+          r.id === id ? { ...r, active: !r.active } : r
+        ),
+      };
+    });
   };
 
   const handleDeleteRecurringRule = async (id: string) => {
@@ -1715,13 +1855,17 @@ export function App() {
     }));
   };
 
-  const handleUpdateGoalAmount = (id: string, currentAmount: number) => {
+  const handleUpdateGoal = (id: string, patch: Partial<SavingsGoal>) => {
     setState((prev) => ({
       ...prev,
       savingsGoals: prev.savingsGoals.map((g) =>
-        g.id === id ? { ...g, currentAmount } : g
+        g.id === id ? { ...g, ...patch } : g
       ),
     }));
+  };
+
+  const handleUpdateGoalAmount = (id: string, currentAmount: number) => {
+    handleUpdateGoal(id, { currentAmount });
   };
 
   const handleDeleteGoal = async (id: string) => {
@@ -1768,6 +1912,43 @@ export function App() {
     }));
   };
 
+  const handleReconcileAccount = (accountId: string, parsedBalance: number) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setState((prev) => {
+      const acc = (prev.accounts ?? []).find((a) => a.id === accountId);
+      if (!acc) return prev;
+      const targets = savingsTargetMap(prev.categories ?? []);
+      const ws = computeWorksheetSavingsTransfers(prev).get(acc.id);
+      const wsArg = ws
+        ? {
+            total: ws.total,
+            pending: ws.pendingAfter(today),
+            count: ws.count,
+          }
+        : undefined;
+      const probe = computeAccountLiveBalance(
+        { ...acc, currentBalance: 0, startingBalance: 0, updatedAt: today },
+        prev.transactions ?? [],
+        targets,
+        wsArg
+      );
+      const nextCurrent = parsedBalance - probe.liveBalance;
+      return {
+        ...prev,
+        accounts: (prev.accounts ?? []).map((a) =>
+          a.id === accountId
+            ? {
+                ...a,
+                currentBalance: nextCurrent,
+                startingBalance: nextCurrent,
+                updatedAt: today,
+              }
+            : a
+        ),
+      };
+    });
+  };
+
   const handleDeleteAccount = async (accountId: string) => {
     const acc = (state.accounts ?? []).find((a) => a.id === accountId);
     if (
@@ -1782,6 +1963,12 @@ export function App() {
     setState((prev) => ({
       ...prev,
       accounts: (prev.accounts ?? []).filter((a) => a.id !== accountId),
+      categories: prev.categories.map((c) =>
+        c.targetAccountId === accountId ? { ...c, targetAccountId: undefined } : c
+      ),
+      savingsGoals: prev.savingsGoals.map((g) =>
+        g.linkedAccountId === accountId ? { ...g, linkedAccountId: undefined } : g
+      ),
       transactions: prev.transactions.map((t) =>
         t.accountId === accountId ? { ...t, accountId: undefined } : t
       ),
@@ -2510,7 +2697,7 @@ export function App() {
                   updateInfo.download_url || updateInfo.release_url
                 )
               }
-              className="h-7 px-3 inline-flex items-center gap-1.5 rounded-md bg-positive text-white text-[11px] font-medium hover:opacity-90 cursor-pointer"
+              className="h-7 px-3 inline-flex items-center gap-1.5 rounded-md bg-positive text-on-positive text-[11px] font-medium hover:opacity-90 cursor-pointer"
             >
               <Download className="w-3 h-3" />
               <span>
@@ -2553,7 +2740,7 @@ export function App() {
                 setInitialPendingFilePath(pendingImportFiles[0].path);
                 setShowImportModal(true);
               }}
-              className="h-7 px-3 inline-flex items-center gap-1.5 rounded-md bg-indigo text-white text-[11px] font-medium hover:opacity-90 cursor-pointer"
+              className="h-7 px-3 inline-flex items-center gap-1.5 rounded-md bg-indigo text-on-indigo text-[11px] font-medium hover:opacity-90 cursor-pointer"
             >
               <span>{t('bankImport.reviewNowBtn')}</span>
             </button>
@@ -2599,6 +2786,11 @@ export function App() {
               onResetScheduledBudget={handleResetScheduledBudget}
               onToggleCategoryFixed={handleToggleCategoryFixed}
               accounts={state.accounts ?? []}
+              onUpdateCategoryTargetAccount={(catId, targetAccountId) =>
+                handleUpdateCategory(catId, { targetAccountId })
+              }
+              onReorderCategory={handleReorderCategory}
+              onUpdateSettings={updateSettings}
               onRenameCategory={(catId, name) =>
                 handleUpdateCategory(catId, { name })
               }
@@ -2662,11 +2854,14 @@ export function App() {
             <AccountsNetWorthView
               netWorth={netWorthMetrics}
               snapshots={state.netWorthSnapshots ?? []}
+              savingsGoals={state.savingsGoals}
               workspace={state.settings.activeWorkspace}
               monthKey={monthKey}
               currency={state.settings.currency}
               onAddAccount={handleAddAccount}
               onUpdateAccount={handleUpdateAccount}
+              onReconcileAccount={handleReconcileAccount}
+              onUpdateGoal={handleUpdateGoal}
               onDeleteAccount={handleDeleteAccount}
               onTransferBetweenAccounts={handleTransferBetweenAccounts}
               onSaveSnapshot={handleSaveNetWorthSnapshot}
@@ -2730,9 +2925,11 @@ export function App() {
           {activeTab === 'goals' && (
             <SavingsGoalsView
               goals={state.savingsGoals}
+              accounts={netWorthMetrics.accounts}
               workspace={state.settings.activeWorkspace}
               currency={state.settings.currency}
               onAddGoal={handleAddGoal}
+              onUpdateGoal={handleUpdateGoal}
               onUpdateGoalAmount={handleUpdateGoalAmount}
               onDeleteGoal={handleDeleteGoal}
             />

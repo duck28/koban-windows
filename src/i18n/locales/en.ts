@@ -683,6 +683,7 @@ export const en = {
   'yearly.recurringBadge': 'Recurring',
   'yearly.yieldBadge': 'Est. +{gain} yield in {year} · 5-Yr Value: {val} ({rate}% p.a.)',
   'yearly.moShort': 'Mo:',
+  'yearly.perWeeklyShort': 'Per wk:',
   'yearly.perBiweeklyShort': 'Per 2 wk:',
   'yearly.perBimonthlyShort': 'Per 2 mo:',
   'yearly.perQuarterShort': 'Per qtr:',
@@ -724,6 +725,7 @@ export const en = {
   'recurring.descLabel': 'Description / Subscription Name',
   'recurring.descPlaceholder': 'e.g. Wages, Mortgage/Rent, Health Insurance',
   'recurring.freqLabel': 'Frequency',
+  'recurring.freqWeekly': 'Weekly',
   'recurring.freqBiweekly': 'Bi-weekly',
   'recurring.freqMonthly': 'Monthly',
   'recurring.freqBimonthly': 'Bi-monthly',
@@ -770,6 +772,7 @@ export const en = {
   'recurring.startWeekLabel': 'Start week',
   'recurring.weekdayLabel': 'Weekday',
   'recurring.startMonthLabel': 'Start month',
+  'recurring.startDateLabel': 'Start date',
   'recurring.setStart': 'Set a start week / month',
   'recurring.startMissingTip': 'Pick when this starts so Koban knows which weeks or months it falls due in.',
   'recurring.thisMonth': '{month}: {dates} · {amount}',
@@ -852,6 +855,11 @@ export const en = {
   'accounts.recordedSnapshotsTitle': 'Recorded Monthly Balance Sheet Snapshots ({count})',
   'accounts.liquidPrefix': 'Liquid:',
   'accounts.retirementPrefix': 'Retirement:',
+  'accounts.subBucketsTitle': 'Savings Goals & Sub-Buckets ({count})',
+  'accounts.allocatedToGoals': 'Allocated:',
+  'accounts.unallocatedBalance': 'Available:',
+  'accounts.attachGoalPlaceholder': '+ Attach goal / reserve…',
+  'accounts.detachGoalTip': 'Detach goal from this account',
 
   // Account Types & Classes
   'accType.checking': 'Bank Checking / Everyday Account',
@@ -936,6 +944,12 @@ export const en = {
   'goals.monthsLeftAt': '~{months} mo left at {amount}/mo',
   'goals.remaining': '{amount} remaining',
   'goals.balanceLabel': 'Balance:',
+  'goals.linkedAccountLabel': 'Source Bank Account',
+  'goals.unassignedAccount': 'No linked account',
+  'goals.subBucketOf': 'Sub-bucket of {account}',
+  'goals.accountBalanceInfo': 'Account balance: {balance}',
+  'goals.unallocatedInAccount': 'Unallocated in account: {amount}',
+  'goals.allocatedShare': '{pct}% of account ({total} allocated total)',
 
   // Backups & Export View
   'backups.title': 'Encrypted Database, Backups & Data Import / Export',
@@ -1336,6 +1350,16 @@ export const en = {
   'bankImport.ruleNameOptional': 'Rule name (optional)',
   'bankImport.noRulesYet': 'No categorization rules saved yet. Click "+ Rule" on any imported transaction or add one above.',
   'bankImport.noProfilesYet': 'No custom bank CSV profiles saved yet. Unknown bank CSVs let you save a mapping once.',
+  'worksheet.sortLabel': 'Sort',
+  'worksheet.sortManual': 'Manual (Drag)',
+  'worksheet.sortName': 'Name',
+  'worksheet.sortBudget': 'Budget',
+  'worksheet.sortActual': 'Actual',
+  'worksheet.sortDiff': 'Diff.',
+  'worksheet.dragRowTip': 'Drag to reorder or move to another group',
+  'worksheet.resizeColTip': 'Drag to resize column • Double-click to reset',
+  'worksheet.resizeSplitTip': 'Drag to adjust left/right column width • Double-click to reset',
+  'worksheet.resetWidthsBtn': 'Reset Columns',
 } as const;
 
 export type TranslationKey = keyof typeof en;

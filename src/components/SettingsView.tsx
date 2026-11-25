@@ -799,7 +799,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <button
                 type="button"
                 onClick={() => openExternalUrl(updateInfo.download_url || updateInfo.release_url)}
-                className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-positive text-white text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-lg bg-positive text-on-positive text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>

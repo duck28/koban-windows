@@ -114,7 +114,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={() => onResolve(true, dontAsk)}
             className={`h-8 px-4 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium hover:opacity-90 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${
               destructive
-                ? 'bg-accent text-white focus-visible:ring-accent/50'
+                ? 'bg-accent text-on-accent focus-visible:ring-accent/50'
                 : 'bg-ink text-on-ink focus-visible:ring-ink/40'
             }`}
           >

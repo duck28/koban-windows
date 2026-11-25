@@ -15,6 +15,8 @@ import {
   ReceiptText,
   Building2,
   RefreshCw,
+  Target,
+  X,
 } from 'lucide-react';
 import {
   AccountLiquidityClass,
@@ -23,6 +25,7 @@ import {
   FinancialAccount,
   LedgerMode,
   NetWorthSnapshot,
+  SavingsGoal,
 } from '../types';
 import {
   ACCOUNT_CLASS_META,
@@ -40,6 +43,7 @@ import { useI18n } from '../i18n';
 interface AccountsNetWorthViewProps {
   netWorth: NetWorthSummaryMetrics;
   snapshots: NetWorthSnapshot[];
+  savingsGoals?: SavingsGoal[];
   workspace: ActiveWorkspace;
   monthKey: string;
   currency: string;
@@ -48,6 +52,8 @@ interface AccountsNetWorthViewProps {
     accountId: string,
     patch: Partial<FinancialAccount>
   ) => void;
+  onReconcileAccount?: (accountId: string, parsedBalance: number) => void;
+  onUpdateGoal?: (id: string, patch: Partial<SavingsGoal>) => void;
   onDeleteAccount: (accountId: string) => void;
   onTransferBetweenAccounts: (
     fromAccountId: string,
@@ -66,11 +72,14 @@ type FilterBucket = 'all' | AccountLiquidityClass;
 export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
   netWorth,
   snapshots,
+  savingsGoals = [],
   workspace,
   monthKey,
   currency,
   onAddAccount,
   onUpdateAccount,
+  onReconcileAccount,
+  onUpdateGoal,
   onDeleteAccount,
   onTransferBetweenAccounts,
   onSaveSnapshot,
@@ -81,6 +90,7 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
     t,
     tf,
     tAccountName,
+    tGoalName,
     tAccType,
     tAccTypeShort,
     tAccClass,
@@ -199,10 +209,17 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
           currentBalance: parsed,
           updatedAt: new Date().toISOString().slice(0, 10),
         });
+      } else if (onReconcileAccount) {
+        onReconcileAccount(item.account.id, parsed);
       } else {
+        const pendingDelta =
+          item.account.classification === 'liability'
+            ? -(item.pendingTransferIn ?? 0)
+            : (item.pendingTransferIn ?? 0);
+        const nextCurrent = parsed - pendingDelta;
         onUpdateAccount(item.account.id, {
-          currentBalance: parsed,
-          startingBalance: parsed,
+          currentBalance: nextCurrent,
+          startingBalance: nextCurrent,
           updatedAt: new Date().toISOString().slice(0, 10),
         });
       }
@@ -792,6 +809,20 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
               const ClassIcon = getClassIcon(account.classification);
               const isLiability = account.classification === 'liability';
               const isEditing = editingBalanceId === account.id;
+              const attachedGoals = savingsGoals.filter(
+                (g) => g.linkedAccountId === account.id
+              );
+              const unlinkedGoals = !isLiability
+                ? savingsGoals.filter(
+                    (g) => !g.linkedAccountId && g.mode === account.mode
+                  )
+                : [];
+              const totalAllocated = attachedGoals.reduce(
+                (s, g) => s + g.currentAmount,
+                0
+              );
+              const unallocatedBalance = liveBalance - totalAllocated;
+              const barDenominator = Math.max(liveBalance, totalAllocated, 1);
 
               return (
                 <div
@@ -894,6 +925,124 @@ export const AccountsNetWorthView: React.FC<AccountsNetWorthViewProps> = ({
                         </button>
                       )}
                     </div>
+
+                    {/* Attached Savings Goals / Sub-Buckets */}
+                    {(attachedGoals.length > 0 ||
+                      (unlinkedGoals.length > 0 && onUpdateGoal)) && (
+                      <div className="pt-2.5 border-t border-line/60 space-y-2 text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-ink-3 font-medium">
+                            <Target className="w-3 h-3 text-indigo" />
+                            <span>
+                              {tf('accounts.subBucketsTitle', {
+                                count: attachedGoals.length,
+                              })}
+                            </span>
+                          </span>
+                          {attachedGoals.length > 0 && (
+                            <span
+                              className={`text-[10px] tabular-nums font-medium ${
+                                unallocatedBalance < 0 ? 'text-accent' : 'text-positive'
+                              }`}
+                            >
+                              {t('accounts.unallocatedBalance')}{' '}
+                              {formatCurrency(unallocatedBalance, currency)}
+                            </span>
+                          )}
+                        </div>
+
+                        {attachedGoals.length > 0 && (
+                          <>
+                            <div className="h-2 rounded-full bg-raised overflow-hidden flex border border-line/60">
+                              {attachedGoals.map((g) => {
+                                const widthPct = Math.max(
+                                  0,
+                                  (Math.max(0, g.currentAmount) / barDenominator) * 100
+                                );
+                                if (widthPct <= 0) return null;
+                                return (
+                                  <div
+                                    key={g.id}
+                                    style={{
+                                      width: `${widthPct}%`,
+                                      backgroundColor: g.color,
+                                    }}
+                                    title={`${tGoalName(g)}: ${formatCurrency(
+                                      g.currentAmount,
+                                      currency
+                                    )} / ${formatCurrency(g.targetAmount, currency)}`}
+                                  />
+                                );
+                              })}
+                            </div>
+
+                            <div className="space-y-1">
+                              {attachedGoals.map((g) => (
+                                <div
+                                  key={g.id}
+                                  className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-app border border-line/60 text-[11px]"
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span
+                                      className="w-2 h-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: g.color }}
+                                    />
+                                    <span className="text-ink truncate">
+                                      {tGoalName(g)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                                    <span className="text-ink-2 font-medium">
+                                      {formatCurrency(g.currentAmount, currency)}
+                                    </span>
+                                    <span className="text-ink-3 text-[10px]">
+                                      / {formatNumber(g.targetAmount)}
+                                    </span>
+                                    {onUpdateGoal && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          onUpdateGoal(g.id, {
+                                            linkedAccountId: undefined,
+                                          })
+                                        }
+                                        className="p-0.5 rounded text-ink-3 hover:text-accent cursor-pointer"
+                                        title={t('accounts.detachGoalTip')}
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+
+                        {unlinkedGoals.length > 0 && onUpdateGoal && (
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                onUpdateGoal(e.target.value, {
+                                  linkedAccountId: account.id,
+                                });
+                              }
+                            }}
+                            className="w-full h-6 px-2 rounded bg-app border border-dashed border-line text-[10px] text-ink-2 hover:text-ink focus:outline-none cursor-pointer"
+                          >
+                            <option value="">
+                              {t('accounts.attachGoalPlaceholder')}
+                            </option>
+                            {unlinkedGoals.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {tGoalName(g)} ({formatCurrency(g.currentAmount, currency)})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Footer Controls */}

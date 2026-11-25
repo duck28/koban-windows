@@ -1,33 +1,38 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Target } from 'lucide-react';
+import { Plus, Trash2, Target, Landmark } from 'lucide-react';
 import { ActiveWorkspace, LedgerMode, SavingsGoal } from '../types';
-import { formatCurrency } from '../utils/calculations';
+import { AccountComputedItem, formatCurrency } from '../utils/calculations';
 import { ZEN_PALETTE } from '../data/templates';
 import { useI18n } from '../i18n';
 
 interface SavingsGoalsViewProps {
   goals: SavingsGoal[];
+  accounts: AccountComputedItem[];
   workspace: ActiveWorkspace;
   currency: string;
   onAddGoal: (goal: Omit<SavingsGoal, 'id'>) => void;
+  onUpdateGoal: (id: string, patch: Partial<SavingsGoal>) => void;
   onUpdateGoalAmount: (id: string, currentAmount: number) => void;
   onDeleteGoal: (id: string) => void;
 }
 
 export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
   goals,
+  accounts,
   workspace,
   currency,
   onAddGoal,
+  onUpdateGoal,
   onUpdateGoalAmount,
   onDeleteGoal,
 }) => {
-  const { t, tf, tGoalName } = useI18n();
+  const { t, tf, tGoalName, tAccountName } = useI18n();
   const [name, setName] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
   const [currentAmount, setCurrentAmount] = useState('');
   const [monthlyContribution, setMonthlyContribution] = useState('');
   const [targetDate, setTargetDate] = useState('2027-12-31');
+  const [linkedAccountId, setLinkedAccountId] = useState('');
   const [mode, setMode] = useState<LedgerMode>(
     workspace === 'freelancer' ? 'freelancer' : 'home'
   );
@@ -35,6 +40,13 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
   const visibleGoals = goals.filter((g) =>
     workspace === 'combined' ? true : g.mode === workspace
   );
+
+  const selectableAccounts = accounts.filter(
+    (a) =>
+      a.account.classification !== 'liability' &&
+      (workspace === 'combined' ? true : a.account.mode === workspace)
+  );
+  const accountById = new Map(accounts.map((a) => [a.account.id, a]));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,12 +63,14 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
       currentAmount: parseFloat(currentAmount) || 0,
       monthlyContribution: parseFloat(monthlyContribution) || 0,
       targetDate,
+      linkedAccountId: linkedAccountId || undefined,
       color: ZEN_PALETTE[visibleGoals.length % ZEN_PALETTE.length],
     });
     setName('');
     setTargetAmount('');
     setCurrentAmount('');
     setMonthlyContribution('');
+    setLinkedAccountId('');
   };
 
   return (
@@ -160,6 +174,24 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
           />
         </div>
 
+        <div className="flex-[2_1_170px] min-w-[155px]">
+          <label className="block text-[11px] text-ink-2 mb-1 truncate">
+            {t('goals.linkedAccountLabel')}
+          </label>
+          <select
+            value={linkedAccountId}
+            onChange={(e) => setLinkedAccountId(e.target.value)}
+            className="w-full h-8 px-2 rounded-lg bg-raised border border-line text-xs text-ink focus:outline-none"
+          >
+            <option value="">{t('goals.unassignedAccount')}</option>
+            {selectableAccounts.map((ar) => (
+              <option key={ar.account.id} value={ar.account.id}>
+                {tAccountName(ar.account)} ({formatCurrency(ar.liveBalance, currency)})
+              </option>
+            ))}
+          </select>
+        </div>
+
         <button
           type="submit"
           className="h-8 px-4 rounded-lg bg-ink text-on-ink text-xs font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer shrink-0"
@@ -181,6 +213,29 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
             goal.monthlyContribution > 0
               ? Math.ceil(remaining / goal.monthlyContribution)
               : null;
+
+          const linkedItem = goal.linkedAccountId
+            ? accountById.get(goal.linkedAccountId)
+            : undefined;
+          const siblingGoals = linkedItem
+            ? goals.filter((g) => g.linkedAccountId === linkedItem.account.id)
+            : [];
+          const totalAllocatedOnAccount = siblingGoals.reduce(
+            (sum, g) => sum + g.currentAmount,
+            0
+          );
+          const unallocatedInAccount = linkedItem
+            ? linkedItem.liveBalance - totalAllocatedOnAccount
+            : 0;
+          const shareOfAccountPct =
+            linkedItem && linkedItem.liveBalance > 0
+              ? Math.min(100, Math.max(0, (goal.currentAmount / linkedItem.liveBalance) * 100))
+              : 0;
+          const goalAccounts = accounts.filter(
+            (a) =>
+              a.account.id === goal.linkedAccountId ||
+              (a.account.classification !== 'liability' && a.account.mode === goal.mode)
+          );
 
           return (
             <section
@@ -235,6 +290,62 @@ export const SavingsGoalsView: React.FC<SavingsGoalsViewProps> = ({
                     }}
                   />
                 </div>
+              </div>
+
+              {/* Linked Bank Account / Sub-Bucket Reflection */}
+              <div className="p-2.5 rounded-lg bg-app border border-line/80 space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-ink-2 shrink-0">
+                    <Landmark className="w-3.5 h-3.5 text-indigo" />
+                    <span>{t('goals.linkedAccountLabel')}</span>
+                  </span>
+                  <select
+                    value={goal.linkedAccountId ?? ''}
+                    onChange={(e) =>
+                      onUpdateGoal(goal.id, {
+                        linkedAccountId: e.target.value || undefined,
+                      })
+                    }
+                    className="h-6 px-2 rounded bg-surface border border-line text-[11px] text-ink max-w-[200px] focus:outline-none cursor-pointer"
+                  >
+                    <option value="">{t('goals.unassignedAccount')}</option>
+                    {goalAccounts.map((ar) => (
+                      <option key={ar.account.id} value={ar.account.id}>
+                        {tAccountName(ar.account)} ({formatCurrency(ar.liveBalance, currency)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {linkedItem && (
+                  <div className="pt-1 border-t border-line/60 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 tabular-nums text-[10px]">
+                    <span className="text-ink-3">
+                      {tf('goals.subBucketOf', { account: tAccountName(linkedItem.account) })} ·{' '}
+                      <strong className="text-ink-2">
+                        {tf('goals.accountBalanceInfo', {
+                          balance: formatCurrency(linkedItem.liveBalance, currency),
+                        })}
+                      </strong>
+                    </span>
+                    <span
+                      className={
+                        unallocatedInAccount < 0
+                          ? 'text-accent font-medium'
+                          : 'text-positive font-medium'
+                      }
+                    >
+                      {tf('goals.unallocatedInAccount', {
+                        amount: formatCurrency(unallocatedInAccount, currency),
+                      })}
+                    </span>
+                    <span className="w-full text-ink-3">
+                      {tf('goals.allocatedShare', {
+                        pct: shareOfAccountPct.toFixed(1),
+                        total: formatCurrency(totalAllocatedOnAccount, currency),
+                      })}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-line/60 text-xs">

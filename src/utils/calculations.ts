@@ -8,6 +8,8 @@ import {
   RecurringFrequency,
   RecurringRule,
   TransactionItem,
+  WorksheetSortDirection,
+  WorksheetSortField,
   YearlyPlanSchedule,
 } from '../types';
 import { formatMonthKey } from '../data/templates';
@@ -127,16 +129,10 @@ export function computeMonthSummary(
   const autoFillFixed = state.settings.autoFillFixedActuals ?? true;
 
   // Recurring rules with a start week / month: the budget varies per month
-  const scheduledBudgetByCat = new Map<string, number>();
-  for (const r of state.recurringRules ?? []) {
-    if (!r.active || !(r.amount > 0) || !isScheduledRule(r)) continue;
-    const amt = recurringAmountForMonth(r, monthKey);
-    if (amt === null) continue;
-    scheduledBudgetByCat.set(
-      r.categoryId,
-      (scheduledBudgetByCat.get(r.categoryId) ?? 0) + amt
-    );
-  }
+  const scheduledBudgetByCat = getScheduledBudgetByCategory(
+    state.recurringRules ?? [],
+    monthKey
+  );
 
   const monthTxs = state.transactions.filter(
     (t) => t.monthKey === monthKey && filterMode(t.mode)
@@ -368,6 +364,8 @@ export interface AccountComputedItem {
   txCount: number;
   /** Savings moved in from other accounts (savings categories whose target is this account) */
   txTransferInSum: number;
+  /** Transfers & worksheet savings dated on or after the account's last manual valuation */
+  pendingTransferIn: number;
 }
 
 export interface NetWorthHistoryPoint {
@@ -423,37 +421,140 @@ export function savingsTargetMap(categories: CategoryItem[]): Map<string, string
   return map;
 }
 
+export interface WorksheetSavingsTransfer {
+  total: number;
+  pendingAfter: (updatedAt: string) => number;
+  count: number;
+}
+
+/**
+ * Sums savings amounts assigned directly in the Monthly Budget worksheet
+ * (`monthlyBudgets`: `directActual`, fixed-cost `autoActual`, or budget without transactions)
+ * that exceed logged transactions for each savings category & month, grouped by `targetAccountId`.
+ */
+export function computeWorksheetSavingsTransfers(
+  state: LedgerState,
+  upToMonthKey?: string
+): Map<string, WorksheetSavingsTransfer> {
+  const catById = new Map((state.categories ?? []).map((c) => [c.id, c]));
+  const rules = state.recurringRules ?? [];
+
+  const txStatsByMonthCat = new Map<string, { sum: number; count: number }>();
+  for (const tx of state.transactions ?? []) {
+    if (upToMonthKey && tx.monthKey > upToMonthKey) continue;
+    const key = `${tx.monthKey}::${tx.categoryId}`;
+    const cur = txStatsByMonthCat.get(key) ?? { sum: 0, count: 0 };
+    cur.sum += tx.amount;
+    cur.count += 1;
+    txStatsByMonthCat.set(key, cur);
+  }
+
+  // Last entry per (monthKey, categoryId) wins, matching computeMonthSummary
+  const latestBudgets = new Map<
+    string,
+    { monthKey: string; categoryId: string; budget: number; directActual: number | null; budgetManual: boolean }
+  >();
+  for (const mb of state.monthlyBudgets ?? []) {
+    if (upToMonthKey && mb.monthKey > upToMonthKey) continue;
+    latestBudgets.set(`${mb.monthKey}::${mb.categoryId}`, {
+      monthKey: mb.monthKey,
+      categoryId: mb.categoryId,
+      budget: mb.budget,
+      directActual: mb.directActual ?? null,
+      budgetManual: mb.budgetManual ?? false,
+    });
+  }
+
+  const scheduledCache = new Map<string, Map<string, number>>();
+  const getScheduledForMonth = (mk: string) => {
+    let m = scheduledCache.get(mk);
+    if (!m) {
+      m = getScheduledBudgetByCategory(rules, mk);
+      scheduledCache.set(mk, m);
+    }
+    return m;
+  };
+
+  const accEntries = new Map<
+    string,
+    { byMonth: Array<{ monthEnd: string; amount: number }>; count: number }
+  >();
+
+  for (const [key, mb] of latestBudgets.entries()) {
+    const cat = catById.get(mb.categoryId);
+    if (!cat || cat.kind !== 'savings' || !cat.targetAccountId) continue;
+
+    const txStats = txStatsByMonthCat.get(key) ?? { sum: 0, count: 0 };
+    const scheduledBudget = getScheduledForMonth(mb.monthKey).get(cat.id);
+    const effectiveBudget =
+      scheduledBudget !== undefined && !mb.budgetManual ? scheduledBudget : mb.budget;
+
+    let worksheetVal: number;
+    if (mb.directActual !== null && mb.directActual !== undefined) {
+      worksheetVal = mb.directActual;
+    } else if (txStats.count === 0) {
+      worksheetVal = effectiveBudget;
+    } else {
+      worksheetVal = txStats.sum;
+    }
+
+    const extra = worksheetVal - txStats.sum;
+    if (Math.abs(extra) <= 1e-9) continue;
+
+    const bucket = accEntries.get(cat.targetAccountId) ?? { byMonth: [], count: 0 };
+    bucket.byMonth.push({ monthEnd: `${mb.monthKey}-31`, amount: extra });
+    bucket.count += 1;
+    accEntries.set(cat.targetAccountId, bucket);
+  }
+
+  const result = new Map<string, WorksheetSavingsTransfer>();
+  for (const [accId, data] of accEntries.entries()) {
+    const total = data.byMonth.reduce((s, e) => s + e.amount, 0);
+    result.set(accId, {
+      total,
+      count: data.count,
+      pendingAfter: (updatedAt: string) =>
+        data.byMonth.reduce(
+          (s, e) => (e.monthEnd >= updatedAt ? s + e.amount : s),
+          0
+        ),
+    });
+  }
+  return result;
+}
+
 export function computeAccountLiveBalance(
   account: FinancialAccount,
   transactions: TransactionItem[],
-  savingsTargets: Map<string, string> = new Map()
+  savingsTargets: Map<string, string> = new Map(),
+  worksheetSavings?: { total: number; pending: number; count: number }
 ): AccountComputedItem {
   let txIncomeSum = 0;
   let txExpenseSum = 0;
-  let txCount = 0;
-  let txTransferInSum = 0;
+  let txCount = worksheetSavings?.count ?? 0;
+  let txTransferInSum = worksheetSavings?.total ?? 0;
   // Manually valued accounts: only transfers (savings moved in, or account-to-account transfer
-  // pairs) dated after the last valuation are added, as money in (+) or out (-) of the asset.
-  let pendingTransferIn = 0;
+  // pairs) dated on or after the last valuation are added, as money in (+) or out (-) of the asset.
+  let pendingTransferIn = worksheetSavings?.pending ?? 0;
 
   for (const tx of transactions) {
-    if (tx.accountId === account.id) {
+    if (
+      tx.type === 'expense' &&
+      savingsTargets.get(tx.categoryId) === account.id
+    ) {
+      txCount++;
+      txTransferInSum += tx.amount;
+      if (tx.date >= (account.updatedAt ?? '')) pendingTransferIn += tx.amount;
+    } else if (tx.accountId === account.id) {
       txCount++;
       if (tx.type === 'income') {
         txIncomeSum += tx.amount;
       } else {
         txExpenseSum += tx.amount;
       }
-      if (isAccountTransfer(tx) && tx.date > (account.updatedAt ?? '')) {
+      if (isAccountTransfer(tx) && tx.date >= (account.updatedAt ?? '')) {
         pendingTransferIn += tx.type === 'income' ? tx.amount : -tx.amount;
       }
-    } else if (
-      tx.type === 'expense' &&
-      savingsTargets.get(tx.categoryId) === account.id
-    ) {
-      txCount++;
-      txTransferInSum += tx.amount;
-      if (tx.date > (account.updatedAt ?? '')) pendingTransferIn += tx.amount;
     }
   }
 
@@ -477,6 +578,7 @@ export function computeAccountLiveBalance(
     txNetDelta,
     txCount,
     txTransferInSum,
+    pendingTransferIn,
   };
 }
 
@@ -549,9 +651,22 @@ export function computeNetWorthMetrics(
 
   const rawAccounts = (state.accounts ?? []).filter((a) => filterMode(a.mode));
   const savingsTargets = savingsTargetMap(state.categories ?? []);
-  const accounts = rawAccounts.map((acc) =>
-    computeAccountLiveBalance(acc, state.transactions ?? [], savingsTargets)
-  );
+  const wsTransfers = computeWorksheetSavingsTransfers(state);
+  const accounts = rawAccounts.map((acc) => {
+    const ws = wsTransfers.get(acc.id);
+    return computeAccountLiveBalance(
+      acc,
+      state.transactions ?? [],
+      savingsTargets,
+      ws
+        ? {
+            total: ws.total,
+            pending: ws.pendingAfter(acc.updatedAt ?? ''),
+            count: ws.count,
+          }
+        : undefined
+    );
+  });
   const accountById = new Map(rawAccounts.map((a) => [a.id, a]));
 
   let liquidAssets = 0;
@@ -649,9 +764,22 @@ export function computeNetWorthMetrics(
     if (mk <= todayMonth) {
       const monthEnd = `${mk}-31`;
       const upTo = allTxs.filter((t) => t.date <= monthEnd);
-      const items = rawAccounts.map((acc) =>
-        computeAccountLiveBalance(acc, upTo, savingsTargets)
-      );
+      const wsUpTo = computeWorksheetSavingsTransfers(state, mk);
+      const items = rawAccounts.map((acc) => {
+        const ws = wsUpTo.get(acc.id);
+        return computeAccountLiveBalance(
+          acc,
+          upTo,
+          savingsTargets,
+          ws
+            ? {
+                total: ws.total,
+                pending: ws.pendingAfter(acc.updatedAt ?? ''),
+                count: ws.count,
+              }
+            : undefined
+        );
+      });
       return historyPoint(month, label, mk, totalsByClass(items));
     }
 
@@ -699,6 +827,8 @@ export function computeNetWorthMetrics(
 /** Payments per year for a Yearly Planner schedule. */
 export function planPeriodsPerYear(schedule: YearlyPlanSchedule): number {
   switch (schedule) {
+    case 'weekly':
+      return 52;
     case 'biweekly':
       return 26;
     case 'monthly':
@@ -724,6 +854,8 @@ export function recurringMonthlyEquivalent(
   frequency: RecurringFrequency
 ): number {
   switch (frequency) {
+    case 'weekly':
+      return (amount * 52) / 12;
     case 'biweekly':
       return (amount * 26) / 12;
     case 'monthly':
@@ -742,6 +874,8 @@ export function recurringAnnualEquivalent(
   frequency: RecurringFrequency
 ): number {
   switch (frequency) {
+    case 'weekly':
+      return amount * 52;
     case 'biweekly':
       return amount * 26;
     case 'monthly':
@@ -757,6 +891,7 @@ export function recurringAnnualEquivalent(
 
 export function recurringMonthInterval(frequency: RecurringFrequency): number {
   switch (frequency) {
+    case 'weekly':
     case 'biweekly':
     case 'monthly':
       return 1;
@@ -774,6 +909,10 @@ export function getRecurringDaysInMonth(
   dayOfMonth: number
 ): number[] {
   const d = Math.min(28, Math.max(1, Math.round(dayOfMonth) || 1));
+  if (frequency === 'weekly') {
+    const base = ((d - 1) % 7) + 1;
+    return [base, base + 7, base + 14, base + 21];
+  }
   if (frequency === 'biweekly') {
     return d <= 14 ? [d, d + 14] : [d - 14, d];
   }
@@ -811,21 +950,50 @@ function dayNumberToIso(dayNum: number): string {
 }
 
 /**
- * True when the rule has an explicit start (start week for bi-weekly, start
- * month for bi-monthly / quarterly / yearly), so the amount due varies per month.
+ * True when the rule has an explicit start (start date for weekly/bi-weekly/monthly,
+ * start month or start date for bi-monthly / quarterly / yearly), so the amount due
+ * is computed per month from the schedule.
  */
 export function isScheduledRule(r: RecurringRule): boolean {
-  if (r.frequency === 'biweekly') return parseIsoDay(r.startDate) !== null;
+  if (r.frequency === 'weekly' || r.frequency === 'biweekly') {
+    return parseIsoDay(r.startDate) !== null;
+  }
+  if (r.frequency === 'monthly') {
+    return (
+      parseIsoDay(r.startDate) !== null ||
+      (r.startMonth !== undefined && parseMonthIndex(r.startMonth) !== null)
+    );
+  }
   if (recurringMonthInterval(r.frequency) > 1) {
-    return r.startMonth !== undefined && parseMonthIndex(r.startMonth) !== null;
+    return (
+      (r.startMonth !== undefined && parseMonthIndex(r.startMonth) !== null) ||
+      parseIsoDay(r.startDate) !== null
+    );
   }
   return false;
+}
+
+export function getScheduledBudgetByCategory(
+  rules: RecurringRule[],
+  monthKey: string
+): Map<string, number> {
+  const scheduledBudgetByCat = new Map<string, number>();
+  for (const r of rules) {
+    if (!r.active || !(r.amount > 0) || !isScheduledRule(r)) continue;
+    const amt = recurringAmountForMonth(r, monthKey);
+    if (amt === null) continue;
+    scheduledBudgetByCat.set(
+      r.categoryId,
+      (scheduledBudgetByCat.get(r.categoryId) ?? 0) + amt
+    );
+  }
+  return scheduledBudgetByCat;
 }
 
 /**
  * Dates (YYYY-MM-DD) on which the rule falls due inside `monthKey`.
  * Returns null when it cannot be known (legacy bi-monthly / quarterly / yearly
- * rule without a start month).
+ * rule without a start month or start date).
  */
 export function getRecurringOccurrenceDates(
   r: RecurringRule,
@@ -834,10 +1002,11 @@ export function getRecurringOccurrenceDates(
   const targetIdx = parseMonthIndex(monthKey);
   if (targetIdx === null) return null;
 
-  if (r.frequency === 'biweekly') {
+  if (r.frequency === 'weekly' || r.frequency === 'biweekly') {
+    const step = r.frequency === 'weekly' ? 7 : 14;
     const start = parseIsoDay(r.startDate);
     if (start === null) {
-      return getRecurringDaysInMonth('biweekly', r.dayOfMonth).map(
+      return getRecurringDaysInMonth(r.frequency, r.dayOfMonth).map(
         (d) => `${monthKey}-${String(d).padStart(2, '0')}`
       );
     }
@@ -848,22 +1017,40 @@ export function getRecurringOccurrenceDates(
     if (last < start) return [];
     const offset = Math.max(0, first - start);
     const out: string[] = [];
-    for (let day = start + Math.ceil(offset / 14) * 14; day <= last; day += 14) {
+    for (let day = start + Math.ceil(offset / step) * step; day <= last; day += step) {
       out.push(dayNumberToIso(day));
     }
     return out;
   }
 
-  const dayStr = String(
-    getRecurringDaysInMonth(r.frequency, r.dayOfMonth)[0]
-  ).padStart(2, '0');
+  const parsedStart = parseIsoDay(r.startDate);
+  const effectiveDay =
+    parsedStart !== null
+      ? Math.min(28, Math.max(1, parseInt(r.startDate!.slice(8, 10), 10) || 1))
+      : getRecurringDaysInMonth(r.frequency, r.dayOfMonth)[0];
+  const dayStr = String(effectiveDay).padStart(2, '0');
   const interval = recurringMonthInterval(r.frequency);
-  if (interval === 1) return [`${monthKey}-${dayStr}`];
+  const effectiveStartMonth =
+    r.startMonth ?? (parsedStart !== null ? r.startDate!.slice(0, 7) : undefined);
+  const startIdx = effectiveStartMonth ? parseMonthIndex(effectiveStartMonth) : null;
 
-  const startIdx = r.startMonth ? parseMonthIndex(r.startMonth) : null;
+  if (interval === 1) {
+    if (startIdx !== null) {
+      if (targetIdx < startIdx) return [];
+      if (targetIdx === startIdx && parsedStart !== null) {
+        return [r.startDate!];
+      }
+    }
+    return [`${monthKey}-${dayStr}`];
+  }
+
   if (startIdx === null) return null;
   const diff = targetIdx - startIdx;
-  return diff >= 0 && diff % interval === 0 ? [`${monthKey}-${dayStr}`] : [];
+  if (diff < 0 || diff % interval !== 0) return [];
+  if (diff === 0 && parsedStart !== null) {
+    return [r.startDate!];
+  }
+  return [`${monthKey}-${dayStr}`];
 }
 
 /** Total amount the rule falls due in `monthKey`, or null when unknown. */
@@ -924,32 +1111,33 @@ export function buildRecurringTransactionsForMonth(
     for (const dateStr of dates) {
       const dayStr = dateStr.slice(8, 10);
 
-      const alreadyExists =
-        r.frequency === 'biweekly'
-          ? existingTransactions.some(
-              (tx) =>
-                tx.monthKey === monthKey &&
-                tx.date === dateStr &&
-                (tx.recurringId === r.id ||
-                  (tx.categoryId === r.categoryId &&
-                    tx.description === r.description &&
-                    Math.abs(tx.amount - r.amount) < 0.01))
-            )
-          : existingTransactions.some(
-              (tx) =>
-                tx.monthKey === monthKey &&
-                (tx.recurringId === r.id ||
-                  (tx.categoryId === r.categoryId &&
-                    tx.description === r.description &&
-                    Math.abs(tx.amount - r.amount) < 0.01))
-            );
+      const isMultiPerMonth =
+        r.frequency === 'weekly' || r.frequency === 'biweekly';
+
+      const alreadyExists = isMultiPerMonth
+        ? existingTransactions.some(
+            (tx) =>
+              tx.monthKey === monthKey &&
+              tx.date === dateStr &&
+              (tx.recurringId === r.id ||
+                (tx.categoryId === r.categoryId &&
+                  tx.description === r.description &&
+                  Math.abs(tx.amount - r.amount) < 0.01))
+          )
+        : existingTransactions.some(
+            (tx) =>
+              tx.monthKey === monthKey &&
+              (tx.recurringId === r.id ||
+                (tx.categoryId === r.categoryId &&
+                  tx.description === r.description &&
+                  Math.abs(tx.amount - r.amount) < 0.01))
+          );
 
       if (alreadyExists) continue;
 
-      const id =
-        r.frequency === 'biweekly'
-          ? `tx-rec-${r.id}-${monthKey}-${dayStr}`
-          : `tx-rec-${r.id}-${monthKey}`;
+      const id = isMultiPerMonth
+        ? `tx-rec-${r.id}-${monthKey}-${dayStr}`
+        : `tx-rec-${r.id}-${monthKey}`;
 
       newTransactions.push({
         id,
@@ -1013,4 +1201,114 @@ export function dateInIsoWeek(week: string, weekday: number): string | null {
 /** Today as YYYY-MM-DD (local time). */
 export function todayIso(now: Date = new Date()): string {
   return `${currentMonthKey(now)}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+export function sortWorksheetRows(
+  rows: CategoryComputedRow[],
+  sortBy: WorksheetSortField = 'manual',
+  sortDir: WorksheetSortDirection = 'asc',
+  getDisplayName: (cat: CategoryItem) => string = (c) => c.name
+): CategoryComputedRow[] {
+  const dir = sortDir === 'desc' ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    if (sortBy === 'manual') {
+      return a.category.order - b.category.order;
+    }
+    let cmp = 0;
+    if (sortBy === 'name') {
+      cmp = getDisplayName(a.category).localeCompare(
+        getDisplayName(b.category),
+        undefined,
+        { sensitivity: 'base', numeric: true }
+      );
+    } else if (sortBy === 'budget') {
+      cmp = a.budget - b.budget;
+    } else if (sortBy === 'actual') {
+      cmp = a.actual - b.actual;
+    } else if (sortBy === 'diff') {
+      cmp = a.difference - b.difference;
+    }
+    if (cmp !== 0) return cmp * dir;
+    return a.category.order - b.category.order;
+  });
+}
+
+export function reorderCategoriesList(
+  categories: CategoryItem[],
+  groups: CategoryGroup[],
+  opts: {
+    draggedCategoryId: string;
+    targetGroupId: string;
+    targetCategoryId: string | null;
+    position: 'before' | 'after';
+    /** Current displayed order of category IDs in targetGroupId (e.g. when sorted) */
+    baseOrderIds?: string[];
+  }
+): CategoryItem[] {
+  const dragged = categories.find((c) => c.id === opts.draggedCategoryId);
+  const targetGroup = groups.find((g) => g.id === opts.targetGroupId);
+  if (!dragged || !targetGroup) return categories;
+  if (opts.targetCategoryId === opts.draggedCategoryId) return categories;
+
+  const sourceGroupId = dragged.groupId;
+  const targetMembers = categories
+    .filter((c) => c.groupId === targetGroup.id && c.id !== dragged.id)
+    .sort((a, b) => a.order - b.order);
+
+  let orderedTarget: CategoryItem[];
+  if (opts.baseOrderIds && opts.baseOrderIds.length > 0) {
+    const byId = new Map(targetMembers.map((c) => [c.id, c]));
+    orderedTarget = [];
+    const seen = new Set<string>();
+    for (const id of opts.baseOrderIds) {
+      if (id === dragged.id || seen.has(id)) continue;
+      const item = byId.get(id);
+      if (item) {
+        orderedTarget.push(item);
+        seen.add(id);
+      }
+    }
+    for (const item of targetMembers) {
+      if (!seen.has(item.id)) orderedTarget.push(item);
+    }
+  } else {
+    orderedTarget = [...targetMembers];
+  }
+
+  const updatedDragged: CategoryItem = {
+    ...dragged,
+    groupId: targetGroup.id,
+    kind: targetGroup.kind,
+    mode: targetGroup.mode,
+  };
+
+  let insertIdx = orderedTarget.length;
+  if (opts.targetCategoryId) {
+    const idx = orderedTarget.findIndex((c) => c.id === opts.targetCategoryId);
+    if (idx !== -1) {
+      insertIdx = opts.position === 'before' ? idx : idx + 1;
+    }
+  }
+  orderedTarget.splice(insertIdx, 0, updatedDragged);
+
+  const orderById = new Map<string, number>();
+  orderedTarget.forEach((c, idx) => orderById.set(c.id, idx));
+
+  if (sourceGroupId !== targetGroup.id) {
+    categories
+      .filter((c) => c.groupId === sourceGroupId && c.id !== dragged.id)
+      .sort((a, b) => a.order - b.order)
+      .forEach((c, idx) => orderById.set(c.id, idx));
+  }
+
+  return categories.map((c) => {
+    if (c.id === dragged.id) {
+      return {
+        ...updatedDragged,
+        order: orderById.get(dragged.id) ?? 0,
+      };
+    }
+    const nextOrder = orderById.get(c.id);
+    return nextOrder !== undefined ? { ...c, order: nextOrder } : c;
+  });
 }
